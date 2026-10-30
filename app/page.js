@@ -4,6 +4,7 @@ import { useState } from "react";
 import NoticeList from "./components/NoticeList";
 import NoticeInput from "./components/NoticeInput";
 import AnalysisPanel from "./components/AnalysisPanel";
+import { extractNotice } from "./lib/extractNotice";
 
 const NOTICES = [
   {
@@ -36,6 +37,7 @@ const NOTICES = [
 export default function Home() {
   const [selectedId, setSelectedId] = useState(null);
   const [noticeText, setNoticeText] = useState("");
+  const [analysis, setAnalysis] = useState(null);
 
   const selectedNotice = NOTICES.find((n) => n.id === selectedId) ?? null;
 
@@ -44,7 +46,7 @@ export default function Home() {
       alert("请先粘贴或输入通知原文，再点击解析。");
       return;
     }
-    alert("解析功能将在下一步接入，当前只是界面占位。");
+    setAnalysis(extractNotice(noticeText));
   }
 
   return (
@@ -64,14 +66,12 @@ export default function Home() {
           selectedId={selectedId}
           onSelect={setSelectedId}
         />
-
         <NoticeInput
           value={noticeText}
           onChange={setNoticeText}
           onParse={handleParse}
         />
-
-        <AnalysisPanel selectedNotice={selectedNotice} />
+        <AnalysisPanel selectedNotice={selectedNotice} analysis={analysis} />
       </div>
     </div>
   );
