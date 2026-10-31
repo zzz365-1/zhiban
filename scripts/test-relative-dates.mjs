@@ -4,7 +4,7 @@
  * 完全模拟 page.js 里 handleParse 的逻辑：
  *   1. extractNotice() 跑本地规则
  *   2. isRuleResultGood() 判断是否够好
- *   3. 够好：直接用规则结果，不调 AI（不花钱）
+ *   3. 够好：直接用规则结果，不调 AI
  *   4. 不够好：调 AI，mergeAIResult() 合并
  *   5. 断言最终 deadline，与界面显示的完全一致
  *
@@ -74,12 +74,17 @@ function nextWeekday(today, target) {
   return d;
 }
 
+/**
+ * 归一化日期用于比较。
+ * 关键：无法解析的字符串原样返回，不要转成 null——
+ * 否则“本周”“本月”这种残缺词会和期望的 null 意外相等，把失败藏起来。
+ */
 function normalizeDate(s) {
-  if (!s) return null;
-  const m = String(s).match(
-    /([0-9]{4})[^0-9]*([0-9]{1,2})[^0-9]*([0-9]{1,2})/
-  );
-  if (!m) return null;
+  if (s === null || s === undefined) return null;
+  const str = String(s).trim();
+  if (str === "") return null;
+  const m = str.match(/([0-9]{4})[^0-9]*([0-9]{1,2})[^0-9]*([0-9]{1,2})/);
+  if (!m) return str; // 无法解析 → 保留原始字符串参与比较
   return (
     m[1] +
     "-" +
@@ -139,26 +144,19 @@ async function resolveFinal(text) {
   const rule = extractNotice(text);
 
   if (isRuleResultGood(rule)) {
-    return {
-      final: { ...rule, _source: "rule" },
-      rule,
-      usedAI: false,
-      aiError: null,
-    };
+    return { final: { ...rule, _source: "rule" }, usedAI: false, aiError: null };
   }
 
   try {
     const ai = await callAI(text);
     return {
       final: mergeAIResult(rule, ai),
-      rule,
       usedAI: true,
       aiError: null,
     };
   } catch (e) {
     return {
       final: { ...rule, _source: "rule_fallback" },
-      rule,
       usedAI: true,
       aiError: e.message,
     };
@@ -251,7 +249,7 @@ const CASES = [
       formatCN(new Date(today.getFullYear(), today.getMonth() + 1, 0)),
   },
   {
-    name: "催缴学费（本月25日）",
+    name: "催缴学费（本月25日，今天已过）",
     text: "请欠费同学务必于本月25日前完成缴费，逾期将影响选课。",
     expected: (today) =>
       today.getDate() <= 25
@@ -284,7 +282,7 @@ async function main() {
   console.log("");
 
   if (!API_KEY) {
-    console.log("? 缺少 DEEPSEEK_API_KEY，无法测试。");
+    console.log("FAIL - 缺少 DEEPSEEK_API_KEY，无法测试。");
     process.exitCode = 1;
     return;
   }
@@ -317,14 +315,15 @@ async function main() {
         "/" +
         CASES.length +
         "] " +
-        (ok ? "? " : "? ") +
+        (ok ? "PASS" : "FAIL") +
+        " - " +
         c.name +
-        "  （" +
+        "  (" +
         sourceTag +
-        "）"
+        ")"
     );
-    console.log("    期望：" + (expectedRaw || "(空)"));
-    console.log("    实际：" + (actualRaw || "(空)"));
+    console.log("    期望：" + (expectedRaw === null ? "(空)" : expectedRaw));
+    console.log("    实际：" + (actualRaw === null ? "(空)" : actualRaw));
 
     if (aiError) {
       console.log("    AI 错误：" + aiError);

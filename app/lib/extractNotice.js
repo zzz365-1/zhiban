@@ -14,8 +14,16 @@ const DATE_SOURCES = [
   { source: "(?<![0-9])([0-9]{1,2})[ ]*[-/][ ]*([0-9]{1,2})(?![0-9])", flags: "g" },
   { source: "(?:本|这|下)?[ ]*(?:周|星期)[ ]*[一二三四五六日天]", flags: "g" },
   { source: "(?:大后天|后天|明天|今天)", flags: "g" },
-  { source: "(?:[0-9]{1,2}[ ]*月[底初末]|本月[底初末]?|下月[底初末]?)", flags: "g" },
+  // 完整形式：本月25日 / 下月5日
+  { source: "(?:本月|下月)[0-9]{1,2}[ ]*[日号]", flags: "g" },
+  // 末尾形式：本月底 / 本月初 / 10月底（“底初末”必须有，不接受光秃秃的“本月”）
+  { source: "(?:[0-9]{1,2}[ ]*月[底初末]|本月[底初末]|下月[底初末])", flags: "g" },
 ];
+
+// 残缺日期：光秃秃的“本月”“下周”等，对用户没有意义，一律不作为日期
+const INCOMPLETE_DATE = new RegExp(
+  "^(本周|这周|下周|本星期|这星期|下星期|本月|下月)$"
+);
 
 function findDateCandidates(text) {
   const found = [];
@@ -23,7 +31,12 @@ function findDateCandidates(text) {
     const re = new RegExp(source, flags);
     let m;
     while ((m = re.exec(text)) !== null) {
-      found.push({ text: m[0].trim(), index: m.index, end: m.index + m[0].length, length: m[0].length });
+      found.push({
+        text: m[0].trim(),
+        index: m.index,
+        end: m.index + m[0].length,
+        length: m[0].length,
+      });
     }
   }
   found.sort((a, b) => a.index - b.index || b.length - a.length);
@@ -34,10 +47,14 @@ function findDateCandidates(text) {
   return result;
 }
 
-const DEADLINE_MARKERS = new RegExp("(截止|截至|期限|之前|以前|前完成|前提交|前报送|前将|前上传|前交)");
+const DEADLINE_MARKERS = new RegExp(
+  "(截止|截至|期限|之前|以前|前完成|前提交|前报送|前将|前上传|前交)"
+);
 
 function extractDeadline(text) {
-  const candidates = findDateCandidates(text);
+  const candidates = findDateCandidates(text).filter(
+    (c) => !INCOMPLETE_DATE.test(c.text)
+  );
   if (candidates.length === 0) return null;
   for (const d of candidates) {
     const before = text.slice(Math.max(0, d.index - 15), d.index);
@@ -52,11 +69,13 @@ function extractDeadline(text) {
 
 function extractTime(text) {
   let m = text.match(
-    new RegExp("(上午|下午|中午|晚上|凌晨|早上|傍晚)[ ]*([0-9]{1,2})[ ]*[点时](?:[ ]*([0-9]{1,2})[ ]*分?)?(?:[ ]*半)?")
+    new RegExp(
+      "(上午|下午|中午|晚上|凌晨|早上|傍晚)[ ]*([0-9]{1,2})[ ]*[点时](?:[ ]*([0-9]{1,2})[ ]*分?)?(?:[ ]*半)?"
+    )
   );
   if (m) {
     let h = parseInt(m[2], 10);
-    let min = m[3] ? parseInt(m[3], 10) : (/半/.test(m[0]) ? 30 : 0);
+    let min = m[3] ? parseInt(m[3], 10) : /半/.test(m[0]) ? 30 : 0;
     if (/(下午|晚上|傍晚|中午)/.test(m[1]) && h < 12) h += 12;
     if (/凌晨/.test(m[1]) && h === 12) h = 0;
     return String(h).padStart(2, "0") + ":" + String(min).padStart(2, "0");
@@ -66,7 +85,7 @@ function extractTime(text) {
   m = text.match(new RegExp("([0-9]{1,2})[ ]*[点时](?:[ ]*([0-9]{1,2})[ ]*分?)?(?:[ ]*半)?"));
   if (m) {
     const h = parseInt(m[1], 10);
-    const min = m[2] ? parseInt(m[2], 10) : (/半/.test(m[0]) ? 30 : 0);
+    const min = m[2] ? parseInt(m[2], 10) : /半/.test(m[0]) ? 30 : 0;
     return String(h).padStart(2, "0") + ":" + String(min).padStart(2, "0");
   }
   return null;
@@ -81,7 +100,6 @@ const LOCATION_KEYWORDS = [
   "中心", "广场", "校区", "馆", "厅", "场", "楼", "室",
 ];
 
-// 动作词：出现在"地点候选"里，说明根本不是地名
 const ACTION_WORDS_FOR_LOCATION = [
   "开展", "举行", "举办", "进行", "排查", "检查", "组织", "安排",
   "召开", "参加", "参与", "完成", "落实", "推进", "实施", "部署",
@@ -131,7 +149,6 @@ function cleanLocation(fragment) {
   return candidate;
 }
 
-// 兜底扫描：X楼/层 + ... + 室/厅/场/馆
 function scanCompound(text) {
   const re = new RegExp(
     "([0-9一二三四五六七八九十]+(?:楼|层|号|座)[一-龥A-Za-z0-9]{0,10}?(?:室|厅|场|馆))",
@@ -148,7 +165,6 @@ function scanCompound(text) {
   return null;
 }
 
-// 对短的、无楼/层前缀的地点，尝试用原文里的"X楼/层..."补全
 function enhanceWithCompound(loc, text) {
   if (loc.length > 4) return null;
   if (new RegExp("[0-9一二三四五六七八九十]+(?:楼|层|号|座)").test(loc)) return null;
@@ -168,7 +184,6 @@ function enhanceWithCompound(loc, text) {
 }
 
 function extractLocation(text) {
-  // 1. 显式标签
   let m = text.match(
     new RegExp("(?:地点|地址|场地|会场)[ ]*[:：][ ]*([^" + LF + "，。；;]{2,40})")
   );
@@ -177,7 +192,6 @@ function extractLocation(text) {
     if (loc) return enhanceWithCompound(loc, text) || loc;
   }
 
-  // 2. 在/至/到/前往
   const verbRe = new RegExp("(?:在|至|到|前往)[ ]*([^" + LF + "，。；;]{2,40})", "g");
   let mm;
   while ((mm = verbRe.exec(text)) !== null) {
@@ -185,14 +199,12 @@ function extractLocation(text) {
     if (loc) return enhanceWithCompound(loc, text) || loc;
   }
 
-  // 3. 于
   const yuRe = new RegExp("于[ ]*([^" + LF + "，。；;0-9]{2,40})", "g");
   while ((mm = yuRe.exec(text)) !== null) {
     const loc = cleanLocation(mm[1]);
     if (loc) return enhanceWithCompound(loc, text) || loc;
   }
 
-  // 4. 兜底：复合地点
   const compound = scanCompound(text);
   if (compound) return compound;
 
@@ -208,7 +220,9 @@ const MATERIAL_WORDS = [
   "作品", "文件", "证明", "证件", "回执", "汇总表", "登记表",
 ];
 
-const ACTION_RE = new RegExp("(提交|报送|上交|递交|携带|准备|附上|提供|填写|打印|带|将|需|须|应|上传)");
+const ACTION_RE = new RegExp(
+  "(提交|报送|上交|递交|携带|准备|附上|提供|填写|打印|带|将|需|须|应|上传)"
+);
 
 function extractMaterials(text) {
   const found = [];
@@ -243,7 +257,9 @@ function extractMaterials(text) {
 
 function extractAudience(text) {
   const label = text.match(
-    new RegExp("(?:面向|针对|适用于?|参加对象|参会对象|活动对象)[ ]*[:：]?[ ]*([^" + LF + "，。；;]{2,30})")
+    new RegExp(
+      "(?:面向|针对|适用于?|参加对象|参会对象|活动对象)[ ]*[:：]?[ ]*([^" + LF + "，。；;]{2,30})"
+    )
   );
   if (label) return label[1].trim();
 

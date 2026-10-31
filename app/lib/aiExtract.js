@@ -49,12 +49,16 @@ export function isRuleResultGood(ruleResult) {
 
 /**
  * 合并 AI 结果。
+ *
  * - deadline 与 time 绑定为同一来源。
- * - 如果原文的 deadline 是模糊写法（明天、本周五、本月底等），
- *   最终日期来自 AI 换算，标记 _inferredDeadline = true。
+ * - 本地是模糊日期（本月25日、本周五等）时：
+ *     如果 AI 给了具体日期 → 用 AI 的，标记 _inferredDeadline
+ *     如果 AI 也返回 null → 留空，不要退回那个模糊原文
+ * - 本地是具体日期且 AI 没给 → 用本地的
  */
 export function mergeAIResult(ruleResult, aiResult) {
   const base = ruleResult || {};
+  const baseDeadlineIsFuzzy = Boolean(base.deadline) && isFuzzyDate(base.deadline);
 
   let deadline;
   let time;
@@ -63,9 +67,11 @@ export function mergeAIResult(ruleResult, aiResult) {
   if (aiResult.deadline) {
     deadline = aiResult.deadline;
     time = aiResult.time || null;
-    if (base.deadline && isFuzzyDate(base.deadline)) {
-      inferred = true;
-    }
+    if (baseDeadlineIsFuzzy) inferred = true;
+  } else if (baseDeadlineIsFuzzy) {
+    // 本地是模糊日期，AI 换算不出来 → 留空
+    deadline = null;
+    time = null;
   } else {
     deadline = base.deadline || null;
     time = base.time || null;
