@@ -11,6 +11,7 @@
     "test:calendar": "node scripts/test-calendar.mjs",
     "test:relative": "node scripts/test-relative-dates.mjs",
     "test:manual": "node scripts/test-manual-edit.mjs",
+    "test:share": "node scripts/test-share.mjs",
     "validate:ics": "node scripts/validate-ics.mjs --sample",
     "export:ics": "node scripts/export-ics.mjs"
   },

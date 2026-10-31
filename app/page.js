@@ -7,6 +7,7 @@ import NoticeInput from "./components/NoticeInput";
 import AnalysisPanel from "./components/AnalysisPanel";
 import TodoList from "./components/TodoList";
 import CalendarView from "./components/CalendarView";
+import ShareDialog from "./components/ShareDialog";
 import { extractNotice } from "./lib/extractNotice";
 import { buildDeadlineDate } from "./lib/deadline";
 import { callAIExtract, isRuleResultGood, mergeAIResult } from "./lib/aiExtract";
@@ -56,6 +57,7 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("全部");
+  const [showShare, setShowShare] = useState(false);
 
   useEffect(() => {
     try {
@@ -181,6 +183,7 @@ export default function Home() {
         category={categoryFilter}
         onCategoryChange={setCategoryFilter}
         parsing={parsing}
+        onOpenShare={() => setShowShare(true)}
       />
 
       <div
@@ -220,6 +223,14 @@ export default function Home() {
           onUpdate={handleUpdateAnalysis}
         />
       </div>
+
+      {showShare && (
+        <ShareDialog
+          notices={notices}
+          now={now}
+          onClose={() => setShowShare(false)}
+        />
+      )}
     </div>
   );
 }

@@ -16,6 +16,7 @@ export default function TopBar({
   category,
   onCategoryChange,
   parsing,
+  onOpenShare,
 }) {
   return (
     <header className="flex h-12 flex-none items-center gap-3 border-b border-slate-200 bg-white px-4 shadow-sm">
@@ -50,7 +51,7 @@ export default function TopBar({
           value={searchQuery}
           onChange={(e) => onSearchChange(e.target.value)}
           placeholder="搜索通知"
-          className="w-40 rounded-md border border-slate-200 px-2.5 py-1 text-xs outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+          className="w-36 rounded-md border border-slate-200 px-2.5 py-1 text-xs outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
         />
         <select
           value={category}
@@ -63,6 +64,13 @@ export default function TopBar({
             </option>
           ))}
         </select>
+        <button
+          type="button"
+          onClick={onOpenShare}
+          className="rounded-md border border-blue-200 bg-white px-3 py-1 text-xs font-medium text-blue-600 transition hover:bg-blue-50"
+        >
+          整理成文字
+        </button>
       </div>
     </header>
   );

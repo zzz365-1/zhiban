@@ -9,8 +9,8 @@ import { buildDeadlineDate } from "./deadline.js";
  *
  * 做的事情：
  *   1. 合并 patch 到 analysis
- *   2. analysis._source 改为 "manual"
- *   3. notice.source 同步为 "手动修正"（左侧列表读的是这个字段）
+ *   2. analysis._source 改为 "manual"（右侧标签读这个）
+ *   3. notice.source 同步为 "手动修正"（左侧列表读这个）
  *   4. 如果 title 被改，同步 notice.title
  *   5. 重新计算 deadlineDate（左侧剩余天数、日历格子、待办都靠它）
  */
