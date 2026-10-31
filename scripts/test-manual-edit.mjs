@@ -11,7 +11,8 @@
  * 验证：
  *   - 五种日期写法能识别，非法日期被拒绝
  *   - 修改后剩余天数、日历格子、待办清单三处同步
- *   - 来源标签变为 manual、标题同步、材料正确保存
+ *   - analysis._source 与 notice.source 同时变为手动修正（左右两侧一致）
+ *   - 标题同步、材料正确保存
  *   - 金丝雀：故意用一个不重算 deadlineDate 的坏函数，断言必须 FAIL
  */
 
@@ -30,13 +31,14 @@ function eq(a, b) {
 const BASE_NOTICE = {
   id: "n1",
   title: "原始标题",
+  source: "AI 辅助",
   analysis: {
     deadline: "2026年11月5日",
     time: "17:00",
     location: "A101",
     materials: [],
     audience: null,
-    _source: "rule",
+    _source: "mixed",
   },
   deadlineDate: new Date(2026, 10, 5, 17, 0).getTime(),
 };
@@ -134,15 +136,25 @@ const CASES = [
     expected: 1,
   },
 
-  // --- 来源、标题、材料 ---
+  // --- 来源标记：右侧（analysis._source）与左侧（notice.source）必须一致 ---
   {
-    name: "修改后来源标记为 manual",
+    name: "修改后 analysis._source 为 manual（右侧标签用）",
     actual: () => {
       const u = updateNoticeAnalysis(BASE_NOTICE, { location: "B202" });
       return u.analysis._source;
     },
     expected: "manual",
   },
+  {
+    name: "修改后 notice.source 为「手动修正」（左侧列表用）",
+    actual: () => {
+      const u = updateNoticeAnalysis(BASE_NOTICE, { location: "B202" });
+      return u.source;
+    },
+    expected: "手动修正",
+  },
+
+  // --- 标题、材料 ---
   {
     name: "修改标题后 notice.title 同步",
     actual: () => {
