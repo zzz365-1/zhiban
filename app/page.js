@@ -6,6 +6,7 @@ import NoticeInput from "./components/NoticeInput";
 import AnalysisPanel from "./components/AnalysisPanel";
 import { extractNotice } from "./lib/extractNotice";
 import { buildDeadlineDate } from "./lib/deadline";
+import { callAIExtract, isRuleResultGood, mergeAIResult } from "./lib/aiExtract";
 
 const STORAGE_KEY = "zhiban.notices.v1";
 
@@ -13,19 +14,13 @@ function deriveTitle(text) {
   const lines = String(text || "").split(String.fromCharCode(10));
   for (const line of lines) {
     const t = line.split(String.fromCharCode(13)).join("").trim();
-    if (t) {
-      return t.length > 30 ? t.slice(0, 30) + "…" : t;
-    }
+    if (t) return t.length > 30 ? t.slice(0, 30) + "…" : t;
   }
   return "未命名通知";
 }
 
 function makeId() {
-  return (
-    "n_" +
-    Date.now().toString(36) +
-    Math.random().toString(36).slice(2, 6)
-  );
+  return "n_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 }
 
 export default function Home() {
@@ -34,8 +29,8 @@ export default function Home() {
   const [selectedId, setSelectedId] = useState(null);
   const [noticeText, setNoticeText] = useState("");
   const [analysis, setAnalysis] = useState(null);
+  const [parsing, setParsing] = useState(false);
 
-  // 首次挂载时从 localStorage 读取
   useEffect(() => {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
@@ -49,7 +44,6 @@ export default function Home() {
     setHydrated(true);
   }, []);
 
-  // 通知列表变化时写回 localStorage
   useEffect(() => {
     if (!hydrated) return;
     try {
@@ -59,8 +53,7 @@ export default function Home() {
     }
   }, [notices, hydrated]);
 
-  const selectedNotice =
-    notices.find((n) => n.id === selectedId) ?? null;
+  const selectedNotice = notices.find((n) => n.id === selectedId) ?? null;
 
   function handleSelect(id) {
     const target = notices.find((n) => n.id === id);
@@ -79,13 +72,33 @@ export default function Home() {
     }
   }
 
-  function handleParse() {
-    if (!noticeText.trim()) {
+  async function handleParse() {
+    const text = noticeText.trim();
+    if (!text) {
       alert("请先粘贴或输入通知原文，再点击解析。");
       return;
     }
-    setAnalysis(extractNotice(noticeText));
-    setSelectedId(null); // 新解析视为草稿，可另存
+
+    setParsing(true);
+    setSelectedId(null);
+
+    const ruleResult = extractNotice(text);
+
+    if (isRuleResultGood(ruleResult)) {
+      setAnalysis({ ...ruleResult, _source: "rule" });
+      setParsing(false);
+      return;
+    }
+
+    try {
+      const aiResult = await callAIExtract(text);
+      setAnalysis(mergeAIResult(ruleResult, aiResult));
+    } catch (e) {
+      console.warn("AI 兜底失败，使用规则结果：", e);
+      setAnalysis({ ...ruleResult, _source: "rule_fallback" });
+    } finally {
+      setParsing(false);
+    }
   }
 
   function handleSave() {
@@ -93,8 +106,13 @@ export default function Home() {
     const deadlineDate = buildDeadlineDate(analysis.deadline, analysis.time);
     const notice = {
       id: makeId(),
-      title: deriveTitle(noticeText),
-      source: "手动导入",
+      title: analysis.title || deriveTitle(noticeText),
+      source:
+        analysis._source === "mixed"
+          ? "AI 辅助"
+          : analysis._source === "rule_fallback"
+          ? "本地识别"
+          : "手动导入",
       text: noticeText,
       analysis,
       deadlineDate: deadlineDate ? deadlineDate.getTime() : null,
@@ -111,6 +129,9 @@ export default function Home() {
           知办
         </h1>
         <span className="text-sm text-slate-400">校园通知行动助手</span>
+        {parsing && (
+          <span className="ml-auto text-xs text-blue-500">正在解析…</span>
+        )}
       </header>
 
       <div className="grid min-h-0 flex-1 grid-cols-[260px_1fr_280px]">
@@ -127,8 +148,10 @@ export default function Home() {
           onChange={setNoticeText}
           onParse={handleParse}
           onSave={handleSave}
-          canSave={Boolean(analysis) && !selectedId}
-          saveLabel={selectedId ? "已保存" : "保存到我的通知"}
+          canSave={Boolean(analysis) && !selectedId && !parsing}
+          saveLabel={
+            selectedId ? "已保存" : parsing ? "解析中…" : "保存到我的通知"
+          }
         />
 
         <AnalysisPanel selectedNotice={selectedNotice} analysis={analysis} />

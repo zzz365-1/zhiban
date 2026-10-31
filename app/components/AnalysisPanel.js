@@ -9,6 +9,8 @@ const FIELDS = [
   { key: "location", label: "地点" },
   { key: "materials", label: "需提交材料" },
   { key: "audience", label: "面向对象" },
+  { key: "summary", label: "摘要", ai: true },
+  { key: "category", label: "分类", ai: true },
 ];
 
 function renderValue(value) {
@@ -18,11 +20,26 @@ function renderValue(value) {
   return value || "未识别";
 }
 
+function getSourceInfo(source) {
+  if (source === "mixed") {
+    return { text: "模型补充", cls: "bg-blue-50 text-blue-600" };
+  }
+  if (source === "rule_fallback") {
+    return {
+      text: "模型未接入，已退回本地",
+      cls: "bg-amber-50 text-amber-700",
+    };
+  }
+  return { text: "本地规则识别", cls: "bg-slate-100 text-slate-500" };
+}
+
 export default function AnalysisPanel({ selectedNotice, analysis }) {
   const canExport =
     Boolean(analysis) &&
     Boolean(analysis.deadline) &&
     buildDeadlineDate(analysis.deadline, analysis.time) !== null;
+
+  const sourceInfo = analysis ? getSourceInfo(analysis._source) : null;
 
   function handleExport() {
     if (!canExport) return;
@@ -30,7 +47,7 @@ export default function AnalysisPanel({ selectedNotice, analysis }) {
 
     const title = selectedNotice
       ? selectedNotice.title
-      : "通知截止提醒（知办）";
+      : analysis.title || "通知截止提醒（知办）";
 
     const descriptionParts = [];
     if (analysis.location) descriptionParts.push("地点：" + analysis.location);
@@ -38,6 +55,7 @@ export default function AnalysisPanel({ selectedNotice, analysis }) {
       descriptionParts.push("材料：" + analysis.materials.join("、"));
     }
     if (analysis.audience) descriptionParts.push("对象：" + analysis.audience);
+    if (analysis.summary) descriptionParts.push("摘要：" + analysis.summary);
 
     const ics = generateDeadlineICS({
       title,
@@ -59,10 +77,17 @@ export default function AnalysisPanel({ selectedNotice, analysis }) {
 
   return (
     <aside className="flex h-full flex-col border-l border-slate-200 bg-white">
-      <div className="border-b border-slate-100 px-5 py-4">
+      <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
           解析结果
         </h2>
+        {sourceInfo && (
+          <span
+            className={`rounded px-2 py-0.5 text-[11px] font-medium ${sourceInfo.cls}`}
+          >
+            {sourceInfo.text}
+          </span>
+        )}
       </div>
 
       <div className="flex-1 space-y-4 overflow-y-auto p-5">
@@ -79,7 +104,9 @@ export default function AnalysisPanel({ selectedNotice, analysis }) {
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
               <p className="text-xs font-medium text-slate-400">当前通知</p>
               <p className="mt-1 text-sm font-medium leading-snug text-slate-800">
-                {selectedNotice ? selectedNotice.title : "手动输入的通知"}
+                {selectedNotice
+                  ? selectedNotice.title
+                  : analysis.title || "手动输入的通知"}
               </p>
             </div>
 
@@ -88,9 +115,16 @@ export default function AnalysisPanel({ selectedNotice, analysis }) {
               const isEmpty = text === "未识别";
               return (
                 <div key={field.key}>
-                  <p className="mb-1.5 text-xs font-semibold text-slate-500">
-                    {field.label}
-                  </p>
+                  <div className="mb-1.5 flex items-center gap-1.5">
+                    <p className="text-xs font-semibold text-slate-500">
+                      {field.label}
+                    </p>
+                    {field.ai && (
+                      <span className="rounded bg-slate-100 px-1 py-0.5 text-[10px] font-medium text-slate-400">
+                        AI
+                      </span>
+                    )}
+                  </div>
                   <div
                     className={`min-h-[44px] rounded-lg border px-3 py-2.5 text-sm ${
                       isEmpty
