@@ -17,7 +17,7 @@ export function getCalendarDayDiff(deadlineTs, nowTs) {
  * 规则：
  *   已过期            → "已过期"
  *   0 < 剩余 < 1 小时 → "不到 1 小时"（red）
- *   1–24 小时         → "剩 N 小时"（red，向上取整）
+ *   1–24 小时         → "剩 N 小时"（red，向下取整，最多 23）
  *   ≥ 24 小时         → "剩 N 天"（按自然日）
  *      N ≤ 3 → red，N ≤ 7 → amber，其余 → blue
  */
@@ -26,7 +26,8 @@ export function formatRemaining(deadlineTs, nowTs) {
   if (diff < 0) return { text: "已过期", level: "expired" };
   if (diff < 3600000) return { text: "不到 1 小时", level: "red" };
   if (diff < 86400000) {
-    const hours = Math.ceil(diff / 3600000);
+    // 向下取整：23 小时 50 分显示“剩 23 小时”，不会向上凑成 24
+    const hours = Math.floor(diff / 3600000);
     return { text: "剩 " + hours + " 小时", level: "red" };
   }
   const days = getCalendarDayDiff(deadlineTs, nowTs);
