@@ -22,7 +22,6 @@ export async function callAIExtract(text) {
   return data.result;
 }
 
-// 模糊日期模式：本地规则能抽出原文，但无法换算成具体日期
 const FUZZY_DATE_PATTERNS = [
   new RegExp("^(今天|明天|后天|大后天)$"),
   new RegExp("^(本|这|下)?(周|星期)[一二三四五六日天]$"),
@@ -40,11 +39,6 @@ export function isFuzzyDate(s) {
   return false;
 }
 
-/**
- * 判断规则结果是否“足够好”。
- * 模糊日期（明天、本周五、本月底、下周三等）视为未抽到，
- * 触发 AI 兜底去换算。
- */
 export function isRuleResultGood(ruleResult) {
   if (!ruleResult) return false;
   if (!ruleResult.deadline) return false;
@@ -55,16 +49,23 @@ export function isRuleResultGood(ruleResult) {
 
 /**
  * 合并 AI 结果。
- * deadline 与 time 绑定为同一来源，避免跨来源拼接。
+ * - deadline 与 time 绑定为同一来源。
+ * - 如果原文的 deadline 是模糊写法（明天、本周五、本月底等），
+ *   最终日期来自 AI 换算，标记 _inferredDeadline = true。
  */
 export function mergeAIResult(ruleResult, aiResult) {
   const base = ruleResult || {};
 
   let deadline;
   let time;
+  let inferred = false;
+
   if (aiResult.deadline) {
     deadline = aiResult.deadline;
     time = aiResult.time || null;
+    if (base.deadline && isFuzzyDate(base.deadline)) {
+      inferred = true;
+    }
   } else {
     deadline = base.deadline || null;
     time = base.time || null;
@@ -80,5 +81,6 @@ export function mergeAIResult(ruleResult, aiResult) {
     summary: aiResult.summary || null,
     category: aiResult.category || null,
     _source: "mixed",
+    _inferredDeadline: inferred,
   };
 }

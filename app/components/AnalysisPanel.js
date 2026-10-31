@@ -113,6 +113,11 @@ export default function AnalysisPanel({ selectedNotice, analysis }) {
             {FIELDS.map((field) => {
               const text = renderValue(analysis[field.key]);
               const isEmpty = text === "未识别";
+              const showInferredHint =
+                field.key === "deadline" &&
+                analysis._inferredDeadline &&
+                !isEmpty;
+
               return (
                 <div key={field.key}>
                   <div className="mb-1.5 flex items-center gap-1.5">
@@ -134,6 +139,11 @@ export default function AnalysisPanel({ selectedNotice, analysis }) {
                   >
                     {text}
                   </div>
+                  {showInferredHint && (
+                    <p className="mt-1 text-[11px] leading-relaxed text-amber-600">
+                      原文为相对日期，这里是模型按今天日期换算的结果，仅供参考。
+                    </p>
+                  )}
                 </div>
               );
             })}
