@@ -220,6 +220,7 @@ export default function Home() {
         <AnalysisPanel
           selectedNotice={selectedNotice}
           analysis={displayAnalysis}
+          draftText={noticeText}
           onUpdate={handleUpdateAnalysis}
         />
       </div>

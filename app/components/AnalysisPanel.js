@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { parseUserDateInput } from "../lib/deadline";
+import { parseUserDateInput } from "../lib/deadline.js";
+import { getNoticeTitle } from "../lib/shareText.js";
 
 const FIELDS = [
   { key: "title", label: "标题", editable: true },
@@ -14,18 +15,39 @@ const FIELDS = [
   { key: "category", label: "分类", ai: true, editable: false },
 ];
 
-function renderValue(value) {
-  if (Array.isArray(value)) {
-    return value.length === 0 ? "未识别" : value.join("、");
+/**
+ * 取某个字段用于展示的文本。
+ * title 走 getNoticeTitle 的三层兜底，和分享功能共用同一份逻辑。
+ * 其余字段保持原样：数组用顿号拼接，空值显示“未识别”。
+ */
+function getDisplayText(field, analysis, selectedNotice, draftText) {
+  if (field.key === "title") {
+    return getNoticeTitle({
+      analysis,
+      title: selectedNotice ? selectedNotice.title : null,
+      text: selectedNotice ? selectedNotice.text : draftText,
+    });
   }
-  return value || "未识别";
+  const v = analysis[field.key];
+  if (Array.isArray(v)) {
+    return v.length === 0 ? "未识别" : v.join("、");
+  }
+  return v || "未识别";
 }
 
-function toDraft(field, analysis) {
-  const v = analysis[field.key];
+/**
+ * 编辑时的初始值。
+ * title 用同一份兜底逻辑，用户点“编辑”看到的就是当前展示的标题。
+ */
+function toDraft(field, analysis, selectedNotice, draftText) {
+  if (field.key === "title") {
+    return getDisplayText(field, analysis, selectedNotice, draftText);
+  }
   if (field.isMaterials) {
+    const v = analysis[field.key];
     return Array.isArray(v) ? v.join("、") : "";
   }
+  const v = analysis[field.key];
   return v ? String(v) : "";
 }
 
@@ -45,7 +67,12 @@ function getSourceInfo(source) {
   return { text: "本地规则识别", cls: "bg-slate-100 text-slate-500" };
 }
 
-export default function AnalysisPanel({ selectedNotice, analysis, onUpdate }) {
+export default function AnalysisPanel({
+  selectedNotice,
+  analysis,
+  draftText,
+  onUpdate,
+}) {
   const [editingKey, setEditingKey] = useState(null);
   const [draft, setDraft] = useState("");
   const [error, setError] = useState("");
@@ -54,7 +81,7 @@ export default function AnalysisPanel({ selectedNotice, analysis, onUpdate }) {
 
   function startEdit(field) {
     setEditingKey(field.key);
-    setDraft(toDraft(field, analysis));
+    setDraft(toDraft(field, analysis, selectedNotice, draftText));
     setError("");
   }
 
@@ -128,14 +155,22 @@ export default function AnalysisPanel({ selectedNotice, analysis, onUpdate }) {
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
               <p className="text-xs font-medium text-slate-400">当前通知</p>
               <p className="mt-1 text-sm font-medium leading-snug text-slate-800">
-                {analysis.title ||
-                  (selectedNotice ? selectedNotice.title : "手动输入的通知")}
+                {getNoticeTitle({
+                  analysis,
+                  title: selectedNotice ? selectedNotice.title : null,
+                  text: selectedNotice ? selectedNotice.text : draftText,
+                })}
               </p>
             </div>
 
             {FIELDS.map((field) => {
               const isEditing = editingKey === field.key;
-              const text = renderValue(analysis[field.key]);
+              const text = getDisplayText(
+                field,
+                analysis,
+                selectedNotice,
+                draftText
+              );
               const isEmpty = text === "未识别";
               const showInferredHint =
                 field.key === "deadline" &&

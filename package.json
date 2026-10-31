@@ -12,6 +12,7 @@
     "test:relative": "node scripts/test-relative-dates.mjs",
     "test:manual": "node scripts/test-manual-edit.mjs",
     "test:share": "node scripts/test-share.mjs",
+    "test:title": "node scripts/test-title.mjs",
     "validate:ics": "node scripts/validate-ics.mjs --sample",
     "export:ics": "node scripts/export-ics.mjs"
   },
