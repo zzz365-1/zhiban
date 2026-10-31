@@ -49,13 +49,13 @@ export default function AnalysisPanel({ selectedNotice, analysis }) {
       ? selectedNotice.title
       : analysis.title || "通知截止提醒（知办）";
 
+    // 摘要不进日历：模型生成的摘要可能出错，日历里只放确定性信息
     const descriptionParts = [];
     if (analysis.location) descriptionParts.push("地点：" + analysis.location);
     if (analysis.materials && analysis.materials.length) {
       descriptionParts.push("材料：" + analysis.materials.join("、"));
     }
     if (analysis.audience) descriptionParts.push("对象：" + analysis.audience);
-    if (analysis.summary) descriptionParts.push("摘要：" + analysis.summary);
 
     const ics = generateDeadlineICS({
       title,

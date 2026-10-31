@@ -22,24 +22,40 @@ export async function callAIExtract(text) {
   return data.result;
 }
 
-/**
- * 判断规则结果是否“足够好”。
- */
-export function isRuleResultGood(ruleResult) {
-  if (!ruleResult) return false;
-  return Boolean(ruleResult.deadline) && Boolean(ruleResult.location);
+// 模糊日期模式：本地规则能抽出原文，但无法换算成具体日期
+const FUZZY_DATE_PATTERNS = [
+  new RegExp("^(今天|明天|后天|大后天)$"),
+  new RegExp("^(本|这|下)?(周|星期)[一二三四五六日天]$"),
+  new RegExp("^(本月|下月)?(底|初|末)$"),
+  new RegExp("^[0-9]{1,2}月(底|初|末)$"),
+  new RegExp("^(本月|下月)[0-9]{1,2}[日号]$"),
+];
+
+export function isFuzzyDate(s) {
+  if (!s) return false;
+  const t = String(s).trim();
+  for (const re of FUZZY_DATE_PATTERNS) {
+    if (re.test(t)) return true;
+  }
+  return false;
 }
 
 /**
- * 把 AI 返回的结果合并进规则结果。
- *
- * 核心原则：
- * - deadline 与 time 是不可拆分的一组。只要 AI 给出了 deadline，
- *   就整组使用 AI 的（AI 的 time 即使是 null 也不回退到本地），
- *   避免“日期来自模型、时间来自规则”这种跨来源拼接错误。
- * - AI 没有给出 deadline 时，整组使用本地规则结果。
- * - location 独立判断，AI 优先，AI 没给才用本地。
- * - materials / audience AI 不返回，保持本地规则结果。
+ * 判断规则结果是否“足够好”。
+ * 模糊日期（明天、本周五、本月底、下周三等）视为未抽到，
+ * 触发 AI 兜底去换算。
+ */
+export function isRuleResultGood(ruleResult) {
+  if (!ruleResult) return false;
+  if (!ruleResult.deadline) return false;
+  if (isFuzzyDate(ruleResult.deadline)) return false;
+  if (!ruleResult.location) return false;
+  return true;
+}
+
+/**
+ * 合并 AI 结果。
+ * deadline 与 time 绑定为同一来源，避免跨来源拼接。
  */
 export function mergeAIResult(ruleResult, aiResult) {
   const base = ruleResult || {};
