@@ -17,6 +17,7 @@ export default function TopBar({
   onCategoryChange,
   parsing,
   onOpenShare,
+  onOpenBatch,
 }) {
   return (
     <header className="flex h-12 flex-none items-center gap-3 border-b border-slate-200 bg-white px-4 shadow-sm">
@@ -41,9 +42,7 @@ export default function TopBar({
         ))}
       </nav>
 
-      {parsing && (
-        <span className="text-xs text-blue-500">正在解析…</span>
-      )}
+      {parsing && <span className="text-xs text-blue-500">正在解析…</span>}
 
       <div className="ml-auto flex items-center gap-2">
         <input
@@ -64,6 +63,13 @@ export default function TopBar({
             </option>
           ))}
         </select>
+        <button
+          type="button"
+          onClick={onOpenBatch}
+          className="rounded-md border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600 transition hover:bg-slate-50"
+        >
+          批量粘贴
+        </button>
         <button
           type="button"
           onClick={onOpenShare}

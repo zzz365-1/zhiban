@@ -8,11 +8,12 @@ import AnalysisPanel from "./components/AnalysisPanel";
 import TodoList from "./components/TodoList";
 import CalendarView from "./components/CalendarView";
 import ShareDialog from "./components/ShareDialog";
-import { extractNotice } from "./lib/extractNotice";
-import { buildDeadlineDate } from "./lib/deadline";
-import { callAIExtract, isRuleResultGood, mergeAIResult } from "./lib/aiExtract";
-import { getTodoItems } from "./lib/todo";
-import { updateNoticeAnalysis } from "./lib/noticeOps";
+import BatchDialog from "./components/BatchDialog";
+import { buildDeadlineDate } from "./lib/deadline.js";
+import { getTodoItems } from "./lib/todo.js";
+import { updateNoticeAnalysis } from "./lib/noticeOps.js";
+import { parseOne } from "./lib/parseOne.js";
+import { isDuplicate } from "./lib/splitNotices.js";
 
 const STORAGE_KEY = "zhiban.notices.v1";
 
@@ -25,8 +26,15 @@ function deriveTitle(text) {
   return "未命名通知";
 }
 
-function makeId() {
-  return "n_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+function makeId(seed) {
+  return (
+    "n_" +
+    Date.now().toString(36) +
+    "_" +
+    (seed !== undefined ? seed : "") +
+    "_" +
+    Math.random().toString(36).slice(2, 6)
+  );
 }
 
 function filterNotices(notices, query, category) {
@@ -35,8 +43,7 @@ function filterNotices(notices, query, category) {
   if (q) {
     result = result.filter(
       (n) =>
-        (n.title && n.title.includes(q)) ||
-        (n.text && n.text.includes(q))
+        (n.title && n.title.includes(q)) || (n.text && n.text.includes(q))
     );
   }
   if (category && category !== "全部") {
@@ -45,6 +52,13 @@ function filterNotices(notices, query, category) {
     );
   }
   return result;
+}
+
+function sourceLabel(source) {
+  if (source === "manual") return "手动修正";
+  if (source === "mixed") return "AI 辅助";
+  if (source === "rule_fallback") return "本地识别";
+  return "手动导入";
 }
 
 export default function Home() {
@@ -58,6 +72,7 @@ export default function Home() {
   const [searchQuery, setSearchQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("全部");
   const [showShare, setShowShare] = useState(false);
+  const [showBatch, setShowBatch] = useState(false);
 
   useEffect(() => {
     try {
@@ -113,41 +128,20 @@ export default function Home() {
       alert("请先粘贴或输入通知原文，再点击解析。");
       return;
     }
-
     setParsing(true);
     setSelectedId(null);
-
-    const ruleResult = extractNotice(text);
-
-    if (isRuleResultGood(ruleResult)) {
-      setAnalysis({ ...ruleResult, _source: "rule" });
-      setParsing(false);
-      return;
-    }
-
-    try {
-      const aiResult = await callAIExtract(text);
-      setAnalysis(mergeAIResult(ruleResult, aiResult));
-    } catch (e) {
-      console.warn("AI 兜底失败，使用规则结果：", e);
-      setAnalysis({ ...ruleResult, _source: "rule_fallback" });
-    } finally {
-      setParsing(false);
-    }
+    const result = await parseOne(text);
+    setAnalysis(result.analysis);
+    setParsing(false);
   }
 
   function handleSave() {
     if (!analysis || selectedId) return;
     const deadlineDate = buildDeadlineDate(analysis.deadline, analysis.time);
-    let source = "手动导入";
-    if (analysis._source === "manual") source = "手动修正";
-    else if (analysis._source === "mixed") source = "AI 辅助";
-    else if (analysis._source === "rule_fallback") source = "本地识别";
-
     const notice = {
       id: makeId(),
       title: analysis.title || deriveTitle(noticeText),
-      source,
+      source: sourceLabel(analysis._source),
       text: noticeText,
       analysis,
       deadlineDate: deadlineDate ? deadlineDate.getTime() : null,
@@ -171,6 +165,41 @@ export default function Home() {
     }
   }
 
+  function handleBatchSave(items) {
+    if (!items.length) {
+      setShowBatch(false);
+      return;
+    }
+
+    const newNotices = [];
+    const seen = notices.slice();
+    let seed = 0;
+
+    for (const item of items) {
+      if (isDuplicate(item.text, seen)) continue;
+      const deadlineDate = buildDeadlineDate(
+        item.analysis.deadline,
+        item.analysis.time
+      );
+      const notice = {
+        id: makeId(seed++),
+        title: item.analysis.title || deriveTitle(item.text),
+        source: sourceLabel(item.analysis._source),
+        text: item.text,
+        analysis: item.analysis,
+        deadlineDate: deadlineDate ? deadlineDate.getTime() : null,
+        savedAt: Date.now(),
+      };
+      newNotices.push(notice);
+      seen.push(notice);
+    }
+
+    if (newNotices.length > 0) {
+      setNotices((prev) => [...newNotices, ...prev]);
+    }
+    setShowBatch(false);
+  }
+
   const leftWidth = activeTab === "calendar" ? "360px" : "260px";
 
   return (
@@ -184,6 +213,7 @@ export default function Home() {
         onCategoryChange={setCategoryFilter}
         parsing={parsing}
         onOpenShare={() => setShowShare(true)}
+        onOpenBatch={() => setShowBatch(true)}
       />
 
       <div
@@ -230,6 +260,14 @@ export default function Home() {
           notices={notices}
           now={now}
           onClose={() => setShowShare(false)}
+        />
+      )}
+
+      {showBatch && (
+        <BatchDialog
+          existingNotices={notices}
+          onSave={handleBatchSave}
+          onClose={() => setShowBatch(false)}
         />
       )}
     </div>
