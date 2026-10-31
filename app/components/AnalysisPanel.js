@@ -1,6 +1,7 @@
 "use client";
 
 import { generateDeadlineICS } from "../lib/generateICS";
+import { buildDeadlineDate } from "../lib/deadline";
 
 const FIELDS = [
   { key: "deadline", label: "截止日期" },
@@ -10,10 +11,6 @@ const FIELDS = [
   { key: "audience", label: "面向对象" },
 ];
 
-const RE_YMD = new RegExp("^([0-9]{4})[ ]*[-/年.][ ]*([0-9]{1,2})[ ]*[-/月.][ ]*([0-9]{1,2})");
-const RE_MD = new RegExp("^([0-9]{1,2})[ ]*(?:月|[/-])[ ]*([0-9]{1,2})");
-const RE_HM = new RegExp("^([0-9]{1,2}):([0-9]{2})$");
-
 function renderValue(value) {
   if (Array.isArray(value)) {
     return value.length === 0 ? "未识别" : value.join("、");
@@ -21,49 +18,10 @@ function renderValue(value) {
   return value || "未识别";
 }
 
-/**
- * 把提取出的 deadline / time 转成 Date。
- * 只处理可确定的具体日期；「本月底」「下周三」这类返回 null，不猜测。
- */
-function buildDeadlineDate(deadline, time) {
-  if (!deadline) return null;
-
-  let year, month, day;
-
-  let m = deadline.match(RE_YMD);
-  if (m) {
-    year = parseInt(m[1], 10);
-    month = parseInt(m[2], 10) - 1;
-    day = parseInt(m[3], 10);
-  } else {
-    m = deadline.match(RE_MD);
-    if (!m) return null;
-    month = parseInt(m[1], 10) - 1;
-    day = parseInt(m[2], 10);
-    year = new Date().getFullYear();
-    const now = new Date();
-    if (month < now.getMonth() || (month === now.getMonth() && day < now.getDate())) {
-      year += 1;
-    }
-  }
-
-  let hours = 0;
-  let minutes = 0;
-  if (time) {
-    const tm = time.match(RE_HM);
-    if (tm) {
-      hours = parseInt(tm[1], 10);
-      minutes = parseInt(tm[2], 10);
-    }
-  }
-
-  return new Date(year, month, day, hours, minutes, 0, 0);
-}
-
 export default function AnalysisPanel({ selectedNotice, analysis }) {
   const canExport =
-    analysis &&
-    analysis.deadline &&
+    Boolean(analysis) &&
+    Boolean(analysis.deadline) &&
     buildDeadlineDate(analysis.deadline, analysis.time) !== null;
 
   function handleExport() {
@@ -111,7 +69,7 @@ export default function AnalysisPanel({ selectedNotice, analysis }) {
         {!analysis && (
           <p className="text-sm leading-relaxed text-slate-400">
             {selectedNotice
-              ? "把这条通知的原文粘贴到中间，点击「解析」后这里会显示提取结果。"
+              ? "这条通知还没有解析结果。"
               : "在左侧选择一条通知，或直接在中间粘贴原文后点击「解析」。"}
           </p>
         )}
