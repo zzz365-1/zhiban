@@ -8,10 +8,10 @@
     "build": "next build",
     "start": "next start",
     "test:extract": "node scripts/test-extract.mjs",
+    "test:calendar": "node scripts/test-calendar.mjs",
+    "test:relative": "node scripts/test-relative-dates.mjs",
     "validate:ics": "node scripts/validate-ics.mjs --sample",
-    "check:key": "node scripts/check-api-key.mjs",
-    "test:location": "node scripts/test-location.mjs",
-    "test:dates": "node scripts/test-relative-dates.mjs"
+    "export:ics": "node scripts/export-ics.mjs"
   },
   "dependencies": {
     "next": "16.3.8",

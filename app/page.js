@@ -1,12 +1,16 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import TopBar from "./components/TopBar";
 import NoticeList from "./components/NoticeList";
 import NoticeInput from "./components/NoticeInput";
 import AnalysisPanel from "./components/AnalysisPanel";
+import TodoList from "./components/TodoList";
+import CalendarView from "./components/CalendarView";
 import { extractNotice } from "./lib/extractNotice";
 import { buildDeadlineDate } from "./lib/deadline";
 import { callAIExtract, isRuleResultGood, mergeAIResult } from "./lib/aiExtract";
+import { getTodoItems } from "./lib/todo";
 
 const STORAGE_KEY = "zhiban.notices.v1";
 
@@ -23,6 +27,24 @@ function makeId() {
   return "n_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 }
 
+function filterNotices(notices, query, category) {
+  let result = notices;
+  const q = query.trim();
+  if (q) {
+    result = result.filter(
+      (n) =>
+        (n.title && n.title.includes(q)) ||
+        (n.text && n.text.includes(q))
+    );
+  }
+  if (category && category !== "全部") {
+    result = result.filter(
+      (n) => n.analysis && n.analysis.category === category
+    );
+  }
+  return result;
+}
+
 export default function Home() {
   const [notices, setNotices] = useState([]);
   const [hydrated, setHydrated] = useState(false);
@@ -30,6 +52,9 @@ export default function Home() {
   const [noticeText, setNoticeText] = useState("");
   const [analysis, setAnalysis] = useState(null);
   const [parsing, setParsing] = useState(false);
+  const [activeTab, setActiveTab] = useState("all");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("全部");
 
   useEffect(() => {
     try {
@@ -52,6 +77,10 @@ export default function Home() {
       console.warn("保存本地通知失败：", e);
     }
   }, [notices, hydrated]);
+
+  const now = Date.now();
+  const filtered = filterNotices(notices, searchQuery, categoryFilter);
+  const todoItems = getTodoItems(filtered, now);
 
   const selectedNotice = notices.find((n) => n.id === selectedId) ?? null;
 
@@ -122,26 +151,39 @@ export default function Home() {
     setSelectedId(notice.id);
   }
 
+  const leftWidth = activeTab === "calendar" ? "360px" : "260px";
+
   return (
     <div className="flex h-screen flex-col bg-slate-100">
-      <header className="flex items-center gap-3 border-b border-slate-200 bg-white px-6 py-3.5 shadow-sm">
-        <h1 className="text-lg font-bold tracking-tight text-slate-900">
-          知办
-        </h1>
-        <span className="text-sm text-slate-400">校园通知行动助手</span>
-        {parsing && (
-          <span className="ml-auto text-xs text-blue-500">正在解析…</span>
-        )}
-      </header>
+      <TopBar
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+        category={categoryFilter}
+        onCategoryChange={setCategoryFilter}
+        parsing={parsing}
+      />
 
-      <div className="grid min-h-0 flex-1 grid-cols-[260px_1fr_280px]">
-        <NoticeList
-          notices={notices}
-          selectedId={selectedId}
-          onSelect={handleSelect}
-          onDelete={handleDelete}
-          hydrated={hydrated}
-        />
+      <div
+        className="grid min-h-0 flex-1"
+        style={{ gridTemplateColumns: leftWidth + " 1fr 280px" }}
+      >
+        <div className="min-h-0 overflow-hidden">
+          {activeTab === "todo" && <TodoList items={todoItems} now={now} />}
+          {activeTab === "calendar" && (
+            <CalendarView notices={filtered} now={now} />
+          )}
+          {activeTab === "all" && (
+            <NoticeList
+              notices={filtered}
+              selectedId={selectedId}
+              onSelect={handleSelect}
+              onDelete={handleDelete}
+              hydrated={hydrated}
+            />
+          )}
+        </div>
 
         <NoticeInput
           value={noticeText}

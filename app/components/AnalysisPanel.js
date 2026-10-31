@@ -1,8 +1,5 @@
 "use client";
 
-import { generateDeadlineICS } from "../lib/generateICS";
-import { buildDeadlineDate } from "../lib/deadline";
-
 const FIELDS = [
   { key: "deadline", label: "截止日期" },
   { key: "time", label: "具体时间" },
@@ -34,46 +31,7 @@ function getSourceInfo(source) {
 }
 
 export default function AnalysisPanel({ selectedNotice, analysis }) {
-  const canExport =
-    Boolean(analysis) &&
-    Boolean(analysis.deadline) &&
-    buildDeadlineDate(analysis.deadline, analysis.time) !== null;
-
   const sourceInfo = analysis ? getSourceInfo(analysis._source) : null;
-
-  function handleExport() {
-    if (!canExport) return;
-    const date = buildDeadlineDate(analysis.deadline, analysis.time);
-
-    const title = selectedNotice
-      ? selectedNotice.title
-      : analysis.title || "通知截止提醒（知办）";
-
-    // 摘要不进日历：模型生成的摘要可能出错，日历里只放确定性信息
-    const descriptionParts = [];
-    if (analysis.location) descriptionParts.push("地点：" + analysis.location);
-    if (analysis.materials && analysis.materials.length) {
-      descriptionParts.push("材料：" + analysis.materials.join("、"));
-    }
-    if (analysis.audience) descriptionParts.push("对象：" + analysis.audience);
-
-    const ics = generateDeadlineICS({
-      title,
-      deadlineDate: date,
-      location: analysis.location || "",
-      description: descriptionParts.join(String.fromCharCode(10)),
-    });
-
-    const blob = new Blob([ics], { type: "text/calendar;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "zhiban-deadline.ics";
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  }
 
   return (
     <aside className="flex h-full flex-col border-l border-slate-200 bg-white">
@@ -147,26 +105,6 @@ export default function AnalysisPanel({ selectedNotice, analysis }) {
                 </div>
               );
             })}
-
-            <div className="pt-2">
-              <button
-                type="button"
-                onClick={handleExport}
-                disabled={!canExport}
-                className={`w-full rounded-lg px-4 py-2.5 text-sm font-medium transition ${
-                  canExport
-                    ? "bg-blue-600 text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-4 focus:ring-blue-200"
-                    : "cursor-not-allowed bg-slate-100 text-slate-400"
-                }`}
-              >
-                {canExport ? "下载日历文件（.ics）" : "缺少可识别的截止日期"}
-              </button>
-              {canExport && (
-                <p className="mt-2 text-center text-xs text-slate-400">
-                  截止前一天自动提醒
-                </p>
-              )}
-            </div>
           </>
         )}
       </div>
