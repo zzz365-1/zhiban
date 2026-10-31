@@ -11,6 +11,7 @@ import { extractNotice } from "./lib/extractNotice";
 import { buildDeadlineDate } from "./lib/deadline";
 import { callAIExtract, isRuleResultGood, mergeAIResult } from "./lib/aiExtract";
 import { getTodoItems } from "./lib/todo";
+import { updateNoticeAnalysis } from "./lib/noticeOps";
 
 const STORAGE_KEY = "zhiban.notices.v1";
 
@@ -83,6 +84,9 @@ export default function Home() {
   const todoItems = getTodoItems(filtered, now);
 
   const selectedNotice = notices.find((n) => n.id === selectedId) ?? null;
+  const displayAnalysis = selectedId
+    ? selectedNotice?.analysis ?? null
+    : analysis;
 
   function handleSelect(id) {
     const target = notices.find((n) => n.id === id);
@@ -133,15 +137,15 @@ export default function Home() {
   function handleSave() {
     if (!analysis || selectedId) return;
     const deadlineDate = buildDeadlineDate(analysis.deadline, analysis.time);
+    let source = "手动导入";
+    if (analysis._source === "manual") source = "手动修正";
+    else if (analysis._source === "mixed") source = "AI 辅助";
+    else if (analysis._source === "rule_fallback") source = "本地识别";
+
     const notice = {
       id: makeId(),
       title: analysis.title || deriveTitle(noticeText),
-      source:
-        analysis._source === "mixed"
-          ? "AI 辅助"
-          : analysis._source === "rule_fallback"
-          ? "本地识别"
-          : "手动导入",
+      source,
       text: noticeText,
       analysis,
       deadlineDate: deadlineDate ? deadlineDate.getTime() : null,
@@ -149,6 +153,20 @@ export default function Home() {
     };
     setNotices((prev) => [notice, ...prev]);
     setSelectedId(notice.id);
+  }
+
+  function handleUpdateAnalysis(patch) {
+    if (selectedId) {
+      setNotices((prev) =>
+        prev.map((n) =>
+          n.id === selectedId ? updateNoticeAnalysis(n, patch) : n
+        )
+      );
+    } else {
+      setAnalysis((prev) =>
+        prev ? { ...prev, ...patch, _source: "manual" } : prev
+      );
+    }
   }
 
   const leftWidth = activeTab === "calendar" ? "360px" : "260px";
@@ -196,7 +214,11 @@ export default function Home() {
           }
         />
 
-        <AnalysisPanel selectedNotice={selectedNotice} analysis={analysis} />
+        <AnalysisPanel
+          selectedNotice={selectedNotice}
+          analysis={displayAnalysis}
+          onUpdate={handleUpdateAnalysis}
+        />
       </div>
     </div>
   );
