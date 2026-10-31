@@ -1,5 +1,5 @@
 /**
- * 端到端断言测试
+ * 端到端断言测试 + 断言逻辑金丝雀自检
  *
  * 完全模拟 page.js 里 handleParse 的逻辑：
  *   1. extractNotice() 跑本地规则
@@ -7,6 +7,9 @@
  *   3. 够好：直接用规则结果，不调 AI
  *   4. 不够好：调 AI，mergeAIResult() 合并
  *   5. 断言最终 deadline，与界面显示的完全一致
+ *
+ * 最后一条是金丝雀用例：故意喂一个垃圾值给断言逻辑，
+ * 预期结果是 FAIL。如果金丝雀变成 PASS，说明断言逻辑坏了。
  *
  * 用法：node scripts/test-relative-dates.mjs
  */
@@ -74,24 +77,50 @@ function nextWeekday(today, target) {
   return d;
 }
 
+const RE_STANDARD_DATE = new RegExp("^[0-9]{4}-[0-9]{2}-[0-9]{2}$");
+
 /**
- * 归一化日期用于比较。
- * 关键：无法解析的字符串原样返回，不要转成 null——
- * 否则“本周”“本月”这种残缺词会和期望的 null 意外相等，把失败藏起来。
+ * 归一化成标准 "YYYY-MM-DD"。
+ * 无法解析成完整日期的字符串一律返回 null——
+ * 调用方必须自己区分“本来就是空”和“解析失败”，
+ * 不允许用 null 表示“不确定”，那正是上一轮藏失败的原因。
  */
 function normalizeDate(s) {
   if (s === null || s === undefined) return null;
   const str = String(s).trim();
   if (str === "") return null;
   const m = str.match(/([0-9]{4})[^0-9]*([0-9]{1,2})[^0-9]*([0-9]{1,2})/);
-  if (!m) return str; // 无法解析 → 保留原始字符串参与比较
-  return (
+  if (!m) return null;
+  const iso =
     m[1] +
     "-" +
     String(m[2]).padStart(2, "0") +
     "-" +
-    String(m[3]).padStart(2, "0")
-  );
+    String(m[3]).padStart(2, "0");
+  if (!RE_STANDARD_DATE.test(iso)) return null;
+  return iso;
+}
+
+function isStrictlyEmpty(s) {
+  if (s === null || s === undefined) return true;
+  return String(s).trim() === "";
+}
+
+/**
+ * 严格比较。
+ * - 期望为空：实际必须严格为空，多一个字都算失败。
+ * - 期望非空：实际必须能归一化成标准日期，且和期望相等。
+ */
+function compareDates(actualRaw, expectedRaw) {
+  if (isStrictlyEmpty(expectedRaw)) {
+    return isStrictlyEmpty(actualRaw);
+  }
+  if (isStrictlyEmpty(actualRaw)) return false;
+  const actualNorm = normalizeDate(actualRaw);
+  const expectedNorm = normalizeDate(expectedRaw);
+  if (actualNorm === null) return false;
+  if (expectedNorm === null) return false;
+  return actualNorm === expectedNorm;
 }
 
 // ---------- 调用 DeepSeek ----------
@@ -149,11 +178,7 @@ async function resolveFinal(text) {
 
   try {
     const ai = await callAI(text);
-    return {
-      final: mergeAIResult(rule, ai),
-      usedAI: true,
-      aiError: null,
-    };
+    return { final: mergeAIResult(rule, ai), usedAI: true, aiError: null };
   } catch (e) {
     return {
       final: { ...rule, _source: "rule_fallback" },
@@ -163,7 +188,7 @@ async function resolveFinal(text) {
   }
 }
 
-// ---------- 测试用例 ----------
+// ---------- 业务测试用例 ----------
 
 const CASES = [
   {
@@ -268,6 +293,50 @@ const CASES = [
   },
 ];
 
+// ---------- 金丝雀自检 ----------
+
+/**
+ * 故意把明显不是日期的垃圾值喂给 compareDates，
+ * 期望 compareDates 拒绝它们（返回 false）。
+ * 如果任何一个垃圾值被错误地判为 PASS，说明断言逻辑失效。
+ *
+ * 返回值：true = 断言逻辑正常；false = 断言逻辑已坏。
+ */
+function runCanary(expectedRaw) {
+  const garbageValues = [
+    "在校生",
+    "行政楼",
+    "本周",
+    "本月",
+    "2026年13月45日",
+    "abc",
+    "2026",
+  ];
+
+  console.log("[19/19] EXPECTED-FAIL - 金丝雀自检（断言逻辑还活着吗？）");
+  console.log("    目的：喂垃圾值给断言，期望被拒绝。");
+
+  let broken = false;
+
+  for (const g of garbageValues) {
+    const wouldPass = compareDates(g, expectedRaw);
+    if (wouldPass) {
+      console.log('    BROKEN：垃圾值 "' + g + '" 被断言错误判为 PASS');
+      broken = true;
+    } else {
+      console.log('    拒绝 "' + g + '" → 判定 FAIL（正确）');
+    }
+  }
+
+  if (broken) {
+    console.log("    结论：EXPECTED-FAIL 未按预期出现，断言逻辑已失效！");
+    return false;
+  }
+
+  console.log("    结论：FAIL（预期内）——断言逻辑正常工作。");
+  return true;
+}
+
 // ---------- 主流程 ----------
 
 async function main() {
@@ -293,12 +362,10 @@ async function main() {
   for (let i = 0; i < CASES.length; i++) {
     const c = CASES[i];
     const expectedRaw = c.expected(today);
-    const expectedNorm = normalizeDate(expectedRaw);
 
     const { final, usedAI, aiError } = await resolveFinal(c.text);
     const actualRaw = final.deadline || null;
-    const actualNorm = normalizeDate(actualRaw);
-    const ok = actualNorm === expectedNorm;
+    const ok = compareDates(actualRaw, expectedRaw);
 
     if (ok) pass++;
     else fail++;
@@ -313,7 +380,7 @@ async function main() {
       "[" +
         (i + 1) +
         "/" +
-        CASES.length +
+        (CASES.length + 1) +
         "] " +
         (ok ? "PASS" : "FAIL") +
         " - " +
@@ -325,9 +392,7 @@ async function main() {
     console.log("    期望：" + (expectedRaw === null ? "(空)" : expectedRaw));
     console.log("    实际：" + (actualRaw === null ? "(空)" : actualRaw));
 
-    if (aiError) {
-      console.log("    AI 错误：" + aiError);
-    }
+    if (aiError) console.log("    AI 错误：" + aiError);
     if (!ok) {
       const snippet = c.text.slice(0, 60).split(LF).join(" ");
       console.log("    原文：" + snippet + " …");
@@ -335,11 +400,25 @@ async function main() {
     console.log("");
   }
 
+  // 金丝雀：故意喂垃圾值给同一个比较逻辑，期望 FAIL
+  const canaryOk = runCanary(null);
+  console.log("");
+
   console.log(
-    "结果：" + pass + " 通过 / " + fail + " 失败 / 共 " + CASES.length + " 条"
+    "业务结果：" +
+      pass +
+      " 通过 / " +
+      fail +
+      " 失败 / 共 " +
+      CASES.length +
+      " 条"
+  );
+  console.log(
+    "金丝雀结果：" +
+      (canaryOk ? "按预期 FAIL（断言逻辑正常）" : "异常 PASS（断言逻辑已坏）")
   );
 
-  if (fail > 0) {
+  if (fail > 0 || !canaryOk) {
     process.exitCode = 1;
   }
 }
