@@ -1,11 +1,20 @@
 /**
- * 相对日期 + 具体日期 断言测试
- * 直接调用 DeepSeek API，提示词与线上共用 app/lib/parsePrompt.js
+ * 端到端断言测试
+ *
+ * 完全模拟 page.js 里 handleParse 的逻辑：
+ *   1. extractNotice() 跑本地规则
+ *   2. isRuleResultGood() 判断是否够好
+ *   3. 够好：直接用规则结果，不调 AI（不花钱）
+ *   4. 不够好：调 AI，mergeAIResult() 合并
+ *   5. 断言最终 deadline，与界面显示的完全一致
+ *
  * 用法：node scripts/test-relative-dates.mjs
  */
 
 import { readFileSync } from "node:fs";
 import { buildMessages } from "../app/lib/parsePrompt.js";
+import { extractNotice } from "../app/lib/extractNotice.js";
+import { isRuleResultGood, mergeAIResult } from "../app/lib/aiExtract.js";
 
 const LF = String.fromCharCode(10);
 
@@ -72,11 +81,15 @@ function normalizeDate(s) {
   );
   if (!m) return null;
   return (
-    m[1] + "-" + String(m[2]).padStart(2, "0") + "-" + String(m[3]).padStart(2, "0")
+    m[1] +
+    "-" +
+    String(m[2]).padStart(2, "0") +
+    "-" +
+    String(m[3]).padStart(2, "0")
   );
 }
 
-// ---------- 调用 API ----------
+// ---------- 调用 DeepSeek ----------
 
 async function callAI(text) {
   if (!API_KEY) throw new Error("缺少 DEEPSEEK_API_KEY");
@@ -120,9 +133,39 @@ async function callAI(text) {
   }
 }
 
+// ---------- 模拟 page.js 的解析流程 ----------
+
+async function resolveFinal(text) {
+  const rule = extractNotice(text);
+
+  if (isRuleResultGood(rule)) {
+    return {
+      final: { ...rule, _source: "rule" },
+      rule,
+      usedAI: false,
+      aiError: null,
+    };
+  }
+
+  try {
+    const ai = await callAI(text);
+    return {
+      final: mergeAIResult(rule, ai),
+      rule,
+      usedAI: true,
+      aiError: null,
+    };
+  } catch (e) {
+    return {
+      final: { ...rule, _source: "rule_fallback" },
+      rule,
+      usedAI: true,
+      aiError: e.message,
+    };
+  }
+}
+
 // ---------- 测试用例 ----------
-// expected 是一个函数 (today) => "YYYY年M月D日" | null
-// 用函数是为了不把日期写死，任何一天跑都成立。
 
 const CASES = [
   {
@@ -154,7 +197,7 @@ const CASES = [
     expected: (today) => formatCN(addDays(today, 3)),
   },
   {
-    name: "消防演练（多个日期，取截止）",
+    name: "消防演练（活动日期即截止）",
     text: `关于组织开展2026年秋季校园消防安全演练的通知
 一、演练时间：2026年11月2日15:00
 二、集合地点：图书馆南广场
@@ -162,12 +205,12 @@ const CASES = [
     expected: () => "2026年11月2日",
   },
   {
-    name: "图像采集（具体日期）",
+    name: "图像采集（无截止动作，用活动日期）",
     text: "毕业生学历图像信息采集定于2026年11月20日上午8:30在大学生活动中心一层大厅进行。",
     expected: () => "2026年11月20日",
   },
   {
-    name: "新生复查（具体日期）",
+    name: "新生复查（有报送动作）",
     text: "请各学院于2026年11月12日17:00前将汇总表报送至行政楼A208学籍管理办公室。",
     expected: () => "2026年11月12日",
   },
@@ -231,11 +274,17 @@ const CASES = [
 
 async function main() {
   const today = new Date();
-  console.log("今天：" + formatCN(today) + "（周" + "日一二三四五六"[today.getDay()] + "）");
+  console.log(
+    "今天：" +
+      formatCN(today) +
+      "（周" +
+      "日一二三四五六"[today.getDay()] +
+      "）"
+  );
   console.log("");
 
   if (!API_KEY) {
-    console.log("✗ 缺少 DEEPSEEK_API_KEY，无法测试。");
+    console.log("? 缺少 DEEPSEEK_API_KEY，无法测试。");
     process.exitCode = 1;
     return;
   }
@@ -248,33 +297,48 @@ async function main() {
     const expectedRaw = c.expected(today);
     const expectedNorm = normalizeDate(expectedRaw);
 
-    let actualRaw = null;
-    let errorMsg = null;
-
-    try {
-      const ai = await callAI(c.text);
-      actualRaw = ai.deadline || null;
-    } catch (e) {
-      errorMsg = e.message;
-    }
-
+    const { final, usedAI, aiError } = await resolveFinal(c.text);
+    const actualRaw = final.deadline || null;
     const actualNorm = normalizeDate(actualRaw);
-    const ok = !errorMsg && actualNorm === expectedNorm;
+    const ok = actualNorm === expectedNorm;
 
     if (ok) pass++;
     else fail++;
 
-    console.log("[" + (i + 1) + "/" + CASES.length + "] " + (ok ? "✓ " : "✗ ") + c.name);
+    const sourceTag = usedAI
+      ? aiError
+        ? "AI 失败→本地"
+        : "AI 兜底"
+      : "本地规则";
+
+    console.log(
+      "[" +
+        (i + 1) +
+        "/" +
+        CASES.length +
+        "] " +
+        (ok ? "? " : "? ") +
+        c.name +
+        "  （" +
+        sourceTag +
+        "）"
+    );
     console.log("    期望：" + (expectedRaw || "(空)"));
-    console.log("    实际：" + (errorMsg ? "调用失败：" + errorMsg : actualRaw || "(空)"));
-    if (!ok && !errorMsg) {
+    console.log("    实际：" + (actualRaw || "(空)"));
+
+    if (aiError) {
+      console.log("    AI 错误：" + aiError);
+    }
+    if (!ok) {
       const snippet = c.text.slice(0, 60).split(LF).join(" ");
       console.log("    原文：" + snippet + " …");
     }
     console.log("");
   }
 
-  console.log("结果：" + pass + " 通过 / " + fail + " 失败 / 共 " + CASES.length + " 条");
+  console.log(
+    "结果：" + pass + " 通过 / " + fail + " 失败 / 共 " + CASES.length + " 条"
+  );
 
   if (fail > 0) {
     process.exitCode = 1;
