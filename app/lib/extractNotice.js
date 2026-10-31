@@ -1,15 +1,10 @@
 /**
  * 规则式通知信息提取器
- * 设计原则：全文件避免正则反斜杠
- *   - 数字用 [0-9] 代替 \\\\d
- *   - 空白用 [ ] 代替 \\\\s
- *   - 中文范围用 [一-龥] 代替 \\\\u4e00-\\\\u9fa5
- *   - 换行/回车用 String.fromCharCode 构造
- * 抽不到返回 null / []，绝不猜测
+ * 全文件避免正则反斜杠：数字用 [0-9]、空白用 [ ]、中文用 [一-龥]
  */
 
-const LF = String.fromCharCode(10);       // 换行符
-const CRLF = String.fromCharCode(13, 10); // 回车+换行
+const LF = String.fromCharCode(10);
+const CRLF = String.fromCharCode(13, 10);
 
 // ---------- 日期 ----------
 
@@ -28,12 +23,7 @@ function findDateCandidates(text) {
     const re = new RegExp(source, flags);
     let m;
     while ((m = re.exec(text)) !== null) {
-      found.push({
-        text: m[0].trim(),
-        index: m.index,
-        end: m.index + m[0].length,
-        length: m[0].length,
-      });
+      found.push({ text: m[0].trim(), index: m.index, end: m.index + m[0].length, length: m[0].length });
     }
   }
   found.sort((a, b) => a.index - b.index || b.length - a.length);
@@ -49,15 +39,11 @@ const DEADLINE_MARKERS = new RegExp("(截止|截至|期限|之前|以前|前完�
 function extractDeadline(text) {
   const candidates = findDateCandidates(text);
   if (candidates.length === 0) return null;
-
   for (const d of candidates) {
     const before = text.slice(Math.max(0, d.index - 15), d.index);
     const after = text.slice(d.end, Math.min(text.length, d.end + 5));
-    if (DEADLINE_MARKERS.test(before) || /^ *前/.test(after)) {
-      return d.text;
-    }
+    if (DEADLINE_MARKERS.test(before) || /^ *前/.test(after)) return d.text;
   }
-
   if (candidates.length === 1) return candidates[0].text;
   return null;
 }
@@ -75,19 +61,14 @@ function extractTime(text) {
     if (/凌晨/.test(m[1]) && h === 12) h = 0;
     return String(h).padStart(2, "0") + ":" + String(min).padStart(2, "0");
   }
-
   m = text.match(new RegExp("(?<![0-9])([0-9]{1,2})[ ]*[:：][ ]*([0-9]{2})(?![0-9])"));
-  if (m) {
-    return String(parseInt(m[1], 10)).padStart(2, "0") + ":" + m[2];
-  }
-
+  if (m) return String(parseInt(m[1], 10)).padStart(2, "0") + ":" + m[2];
   m = text.match(new RegExp("([0-9]{1,2})[ ]*[点时](?:[ ]*([0-9]{1,2})[ ]*分?)?(?:[ ]*半)?"));
   if (m) {
     const h = parseInt(m[1], 10);
     const min = m[2] ? parseInt(m[2], 10) : (/半/.test(m[0]) ? 30 : 0);
     return String(h).padStart(2, "0") + ":" + String(min).padStart(2, "0");
   }
-
   return null;
 }
 
@@ -100,13 +81,38 @@ const LOCATION_KEYWORDS = [
   "中心", "广场", "校区", "馆", "厅", "场", "楼", "室",
 ];
 
-function trimLocation(fragment) {
+// 动作词：出现在"地点候选"里，说明根本不是地名
+const ACTION_WORDS_FOR_LOCATION = [
+  "开展", "举行", "举办", "进行", "排查", "检查", "组织", "安排",
+  "召开", "参加", "参与", "完成", "落实", "推进", "实施", "部署",
+  "启动", "发出", "印发", "宣传", "教育", "培训", "学习", "讨论",
+  "总结", "评估", "核查", "抽查", "整治", "清理", "维修", "改造",
+  "建设", "申报", "报送", "提交", "发放", "领取", "开会",
+  "通报", "处理", "规定", "要求", "决定",
+];
+
+function hasActionWordInLocation(s) {
+  for (const w of ACTION_WORDS_FOR_LOCATION) {
+    if (s.includes(w)) return true;
+  }
+  return false;
+}
+
+function looksLikeTimeOrDateStart(s) {
+  if (new RegExp("^[0-9]{4}[ ]*[-/年]").test(s)) return true;
+  if (new RegExp("^[0-9]{1,2}[ ]*月[ ]*[0-9]{1,2}").test(s)) return true;
+  if (new RegExp("^[0-9]{1,2}[ ]*[:：][ ]*[0-9]{1,2}").test(s)) return true;
+  return false;
+}
+
+function cleanLocation(fragment) {
   if (!fragment) return null;
   const s = fragment.trim();
   if (!s) return null;
+
   if (new RegExp("[0-9]+[ ]*月[ ]*[0-9]+[ ]*[日号]").test(s)) return null;
   if (new RegExp("[0-9]+[ ]*[:：][ ]*[0-9]+").test(s)) return null;
-  if (new RegExp("^[0-9]{4}[ ]*[-/年]").test(s)) return null;
+  if (looksLikeTimeOrDateStart(s)) return null;
 
   let bestEnd = -1;
   for (const kw of LOCATION_KEYWORDS) {
@@ -118,30 +124,77 @@ function trimLocation(fragment) {
     }
   }
   if (bestEnd === -1) return null;
-  return s.slice(0, bestEnd).trim();
+
+  const candidate = s.slice(0, bestEnd).trim();
+  if (candidate.length < 2 || candidate.length > 30) return null;
+  if (hasActionWordInLocation(candidate)) return null;
+  return candidate;
+}
+
+// 兜底扫描：X楼/层 + ... + 室/厅/场/馆
+function scanCompound(text) {
+  const re = new RegExp(
+    "([0-9一二三四五六七八九十]+(?:楼|层|号|座)[一-龥A-Za-z0-9]{0,10}?(?:室|厅|场|馆))",
+    "g"
+  );
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const c = m[1].trim();
+    if (c.length < 3) continue;
+    if (hasActionWordInLocation(c)) continue;
+    if (looksLikeTimeOrDateStart(c)) continue;
+    return c;
+  }
+  return null;
+}
+
+// 对短的、无楼/层前缀的地点，尝试用原文里的"X楼/层..."补全
+function enhanceWithCompound(loc, text) {
+  if (loc.length > 4) return null;
+  if (new RegExp("[0-9一二三四五六七八九十]+(?:楼|层|号|座)").test(loc)) return null;
+
+  const re = new RegExp(
+    "([0-9一二三四五六七八九十]+(?:楼|层|号|座)[一-龥A-Za-z0-9]{0,10}?" + loc + ")",
+    "g"
+  );
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const c = m[1].trim();
+    if (hasActionWordInLocation(c)) continue;
+    if (looksLikeTimeOrDateStart(c)) continue;
+    return c;
+  }
+  return null;
 }
 
 function extractLocation(text) {
+  // 1. 显式标签
   let m = text.match(
     new RegExp("(?:地点|地址|场地|会场)[ ]*[:：][ ]*([^" + LF + "，。；;]{2,40})")
   );
   if (m) {
-    const loc = trimLocation(m[1]);
-    if (loc) return loc;
+    const loc = cleanLocation(m[1]);
+    if (loc) return enhanceWithCompound(loc, text) || loc;
   }
 
+  // 2. 在/至/到/前往
   const verbRe = new RegExp("(?:在|至|到|前往)[ ]*([^" + LF + "，。；;]{2,40})", "g");
   let mm;
   while ((mm = verbRe.exec(text)) !== null) {
-    const loc = trimLocation(mm[1]);
-    if (loc) return loc;
+    const loc = cleanLocation(mm[1]);
+    if (loc) return enhanceWithCompound(loc, text) || loc;
   }
 
+  // 3. 于
   const yuRe = new RegExp("于[ ]*([^" + LF + "，。；;0-9]{2,40})", "g");
   while ((mm = yuRe.exec(text)) !== null) {
-    const loc = trimLocation(mm[1]);
-    if (loc) return loc;
+    const loc = cleanLocation(mm[1]);
+    if (loc) return enhanceWithCompound(loc, text) || loc;
   }
+
+  // 4. 兜底：复合地点
+  const compound = scanCompound(text);
+  if (compound) return compound;
 
   return null;
 }
@@ -159,7 +212,6 @@ const ACTION_RE = new RegExp("(提交|报送|上交|递交|携带|准备|附上|
 
 function extractMaterials(text) {
   const found = [];
-
   for (const word of MATERIAL_WORDS) {
     const idx = text.indexOf(word);
     if (idx === -1) continue;
@@ -206,7 +258,6 @@ function extractAudience(text) {
     const m = text.match(new RegExp(p));
     if (m) return m[1];
   }
-
   return null;
 }
 
