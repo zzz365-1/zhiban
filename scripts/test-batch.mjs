@@ -2,15 +2,15 @@
  * 批量分割 + 去重自检
  * 用法：node scripts/test-batch.mjs
  *
- * 直接引用页面真实在用的模块：
- *   ../app/lib/splitNotices.js
+ * 直接引用页面真实在用的模块：../app/lib/splitNotices.js
  *
  * 验证：
  *   - 空行分隔：2 条、3 条
  *   - 标题分隔：无空行但有多个“关于……的通知”
- *   - 单条：只有一块，返回 1 条
- *   - 空输入、可疑长文本：返回 ok: false
- *   - 去重：相同文本 true，空白差异 true，不同文本 false
+ *   - 单条：只有一块且不像多条
+ *   - 带编号列表的单条通知（一、二、三、四 / 1. 2. 3. / （一）（二））不被拒绝
+ *   - 可疑长文本无边界：报错，不硬拆
+ *   - 去重逻辑
  *   - 金丝雀：用“永远返回 1 条”的坏 split，对多条文本的断言必须拒绝
  */
 
@@ -25,6 +25,38 @@ const LF = String.fromCharCode(10);
 function eq(a, b) {
   return a === b;
 }
+
+// 一条带四项编号子任务的真实通知（你给的那个场景）
+const NUMBERED_CN =
+  "关于期末教学检查各项材料报送的通知" +
+  LF +
+  "一、请于11月10日前报送教学进度表。" +
+  LF +
+  "二、请于11月12日前报送听课记录表。" +
+  LF +
+  "三、请于11月15日前报送学生成绩单。" +
+  LF +
+  "四、请于11月20日前报送课程总结。";
+
+const NUMBERED_ARABIC =
+  "关于期末教学检查各项材料报送的通知" +
+  LF +
+  "1. 请于11月10日前报送教学进度表。" +
+  LF +
+  "2. 请于11月12日前报送听课记录表。" +
+  LF +
+  "3. 请于11月15日前报送学生成绩单。" +
+  LF +
+  "4. 请于11月20日前报送课程总结。";
+
+const NUMBERED_PAREN =
+  "关于期末教学检查各项材料报送的通知" +
+  LF +
+  "（一）请于11月10日前报送教学进度表。" +
+  LF +
+  "（二）请于11月12日前报送听课记录表。" +
+  LF +
+  "（三）请于11月15日前报送学生成绩单。";
 
 const CASES = [
   // --- 空行分隔 ---
@@ -123,6 +155,48 @@ const CASES = [
     expected: "single",
   },
 
+  // --- 带编号列表的单条通知：不能拒绝 ---
+  {
+    name: "带“一、二、三、四”编号的单条通知不被拒绝",
+    actual: () => {
+      const r = splitNotices(NUMBERED_CN);
+      return r.ok ? r.items.length : "err:" + r.reason;
+    },
+    expected: 1,
+  },
+  {
+    name: "带“一、二、三、四”编号的单条通知 method = single",
+    actual: () => {
+      const r = splitNotices(NUMBERED_CN);
+      return r.ok ? r.method : "err";
+    },
+    expected: "single",
+  },
+  {
+    name: "带“1. 2. 3. 4.”编号的单条通知不被拒绝",
+    actual: () => {
+      const r = splitNotices(NUMBERED_ARABIC);
+      return r.ok ? r.items.length : "err:" + r.reason;
+    },
+    expected: 1,
+  },
+  {
+    name: "带“（一）（二）（三）”编号的单条通知不被拒绝",
+    actual: () => {
+      const r = splitNotices(NUMBERED_PAREN);
+      return r.ok ? r.items.length : "err:" + r.reason;
+    },
+    expected: 1,
+  },
+  {
+    name: "编号通知保留完整内容（不丢任何条目）",
+    actual: () => {
+      const r = splitNotices(NUMBERED_CN);
+      return r.ok ? r.items[0].includes("四、请于11月20日前报送课程总结") : "err";
+    },
+    expected: true,
+  },
+
   // --- 空输入 ---
   {
     name: "空输入返回 ok: false",
@@ -135,26 +209,26 @@ const CASES = [
     expected: false,
   },
 
-  // --- 可疑多条分不开 ---
+  // --- 多条无边界、无编号：必须拒绝 ---
   {
-    name: "长文本 + 多个“请于”但无边界：返回 ok: false",
+    name: "无编号 + 多个“请于” + 无边界：返回 ok: false",
     actual: () => {
       let text = "通知内容开始。" + LF;
       for (let i = 0; i < 10; i++) {
         text +=
-          "请于11月" + (i + 1) + "日前完成第" + (i + 1) + "项报送任务。"; 
+          "请于11月" + (i + 1) + "日前完成第" + (i + 1) + "项报送任务。";
       }
       return splitNotices(text).ok;
     },
     expected: false,
   },
   {
-    name: "可疑长文本的 reason 包含“找不到明确的分隔边界”",
+    name: "无编号可疑文本的 reason 包含“找不到明确的分隔边界”",
     actual: () => {
       let text = "通知内容开始。" + LF;
       for (let i = 0; i < 10; i++) {
         text +=
-          "请于11月" + (i + 1) + "日前完成第" + (i + 1) + "项报送任务。"; 
+          "请于11月" + (i + 1) + "日前完成第" + (i + 1) + "项报送任务。";
       }
       const r = splitNotices(text);
       return r.ok ? "err" : r.reason.includes("找不到明确的分隔边界");
@@ -174,7 +248,9 @@ const CASES = [
   {
     name: "去重：空白差异视为相同",
     actual: () =>
-      isDuplicate("关于XX的通知  正文", [{ text: "关于XX的通知" + LF + "正文" }]),
+      isDuplicate("关于XX的通知  正文", [
+        { text: "关于XX的通知" + LF + "正文" },
+      ]),
     expected: true,
   },
   {
@@ -195,19 +271,13 @@ const CASES = [
   },
   {
     name: "规范化：连续空白折叠为单空格",
-    actual: () =>
-      normalizeForDedup("A" + LF + LF + "B" + LF + "C"),
+    actual: () => normalizeForDedup("A" + LF + LF + "B" + LF + "C"),
     expected: "A B C",
   },
 ];
 
 // ---------- 金丝雀 ----------
 
-/**
- * 坏实现：永远返回 1 条，不管输入有几条。
- * 用它去跑真实的多条用例，断言必须 FAIL。
- * 如果断言把 1 当成 2，说明断言逻辑坏了。
- */
 function brokenSplit() {
   return { ok: true, items: ["整段文本"], method: "broken" };
 }

@@ -5,14 +5,17 @@
  * 分割策略（保守，宁可少分也不错分）：
  *   1. 按空行（连续两个及以上换行）分割
  *   2. 若只分出一块，但内部有 ≥2 行以“关于……的通知”开头，按标题行分割
- *   3. 都不行时：若内容像单条，原样返回 1 条
- *   4. 若内容明显有多条迹象却找不到边界，报错，不硬拆
+ *   3. 都不行时：
+ *      a. 若检测到 ≥2 个行首编号（一、/1./（1）等），视为单条通知的结构化条目，
+ *         原样返回 1 条
+ *      b. 否则若内容像单条，原样返回 1 条
+ *      c. 否则若内容明显有多条迹象，报错，不硬拆
  *
- * “多条迹象”判定（任一命中即拒绝）：
+ * “多条迹象”判定（任一命中且无编号列表时拒绝）：
  *   - “请于”≥4 次且长度 > 100
  *   - 长度 > 400 且“请于”≥2 次
  *   - 长度 > 400 且截止类动作词（截止/报送/提交/报名）≥3 次
- *   - 长度 > 1000（无论内容）
+ *   - 长度 > 1000
  */
 
 const CR = String.fromCharCode(13);
@@ -29,6 +32,13 @@ const WS_CHARS =
 const WS_RE = new RegExp("[" + WS_CHARS + "]+", "g");
 
 const HEADER_RE = new RegExp("^关于.+?的通知[：:]?$");
+
+// 行首编号的三类常见写法
+const NUMBERED_PATTERNS = [
+  new RegExp("^[一二三四五六七八九十]+[、.．]"), // 一、 二． 十一、
+  new RegExp("^[（(][一二三四五六七八九十0-9]+[）)]"), // （一） (1)
+  new RegExp("^[0-9]+[、.．)）]"), // 1、 2. 3) 4）
+];
 
 function normalizeLineEndings(text) {
   return String(text || "").split(CRLF).join(LF).split(CR).join(LF);
@@ -76,10 +86,35 @@ function countSubstring(text, sub) {
 }
 
 /**
+ * 统计行首编号条目数。
+ * 只认独立成行的编号（行首、可前置空白），正文里的“第1项”不算。
+ */
+function countNumberedItems(lines) {
+  let count = 0;
+  for (const line of lines) {
+    const t = line.trim();
+    if (!t) continue;
+    for (const p of NUMBERED_PATTERNS) {
+      if (p.test(t)) {
+        count++;
+        break;
+      }
+    }
+  }
+  return count;
+}
+
+/**
  * 判断“一段没有被明确边界切开的文本”是否看起来像多条通知堆在一起。
  * 命中即视为“分不开”，让用户去加空行或加标题，而不是硬拆。
+ *
+ * 前置判断：行首编号列表 ≥2 项 → 这是单条通知的结构化条目，
+ * 不是多条通知堆叠，直接返回 false。
  */
-function looksLikeMultipleNotices(text) {
+function looksLikeMultipleNotices(text, lines) {
+  const numbered = countNumberedItems(lines);
+  if (numbered >= 2) return false;
+
   const qingyu = countSubstring(text, "请于");
   const deadlineWords =
     countSubstring(text, "截止") +
@@ -87,14 +122,9 @@ function looksLikeMultipleNotices(text) {
     countSubstring(text, "提交") +
     countSubstring(text, "报名");
 
-  // 极强信号：短文本里出现 ≥4 个“请于”
   if (qingyu >= 4 && text.length > 100) return true;
-
-  // 中长文本 + 多个截止动作
   if (text.length > 400 && qingyu >= 2) return true;
   if (text.length > 400 && deadlineWords >= 3) return true;
-
-  // 无论内容，超长一律拒绝
   if (text.length > 1000) return true;
 
   return false;
@@ -142,7 +172,7 @@ export function splitNotices(raw) {
 
   // 策略3：看起来像单条，原样返回；看起来像多条但切不开，报错
   if (blocks.length === 1) {
-    if (looksLikeMultipleNotices(text)) {
+    if (looksLikeMultipleNotices(text, lines)) {
       return {
         ok: false,
         reason:
