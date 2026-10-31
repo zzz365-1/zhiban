@@ -5,8 +5,14 @@
  * 分割策略（保守，宁可少分也不错分）：
  *   1. 按空行（连续两个及以上换行）分割
  *   2. 若只分出一块，但内部有 ≥2 行以“关于……的通知”开头，按标题行分割
- *   3. 都不行时：若内容像单条（标题数 0 或 1），原样返回 1 条
- *   4. 若内容明显有多条迹象（>800 字 + 出现 ≥2 次“请于”）却找不到边界，报错，不硬拆
+ *   3. 都不行时：若内容像单条，原样返回 1 条
+ *   4. 若内容明显有多条迹象却找不到边界，报错，不硬拆
+ *
+ * “多条迹象”判定（任一命中即拒绝）：
+ *   - “请于”≥4 次且长度 > 100
+ *   - 长度 > 400 且“请于”≥2 次
+ *   - 长度 > 400 且截止类动作词（截止/报送/提交/报名）≥3 次
+ *   - 长度 > 1000（无论内容）
  */
 
 const CR = String.fromCharCode(13);
@@ -59,6 +65,7 @@ function findHeaderIndices(lines) {
 }
 
 function countSubstring(text, sub) {
+  if (!sub) return 0;
   let count = 0;
   let idx = text.indexOf(sub);
   while (idx !== -1) {
@@ -66,6 +73,31 @@ function countSubstring(text, sub) {
     idx = text.indexOf(sub, idx + sub.length);
   }
   return count;
+}
+
+/**
+ * 判断“一段没有被明确边界切开的文本”是否看起来像多条通知堆在一起。
+ * 命中即视为“分不开”，让用户去加空行或加标题，而不是硬拆。
+ */
+function looksLikeMultipleNotices(text) {
+  const qingyu = countSubstring(text, "请于");
+  const deadlineWords =
+    countSubstring(text, "截止") +
+    countSubstring(text, "报送") +
+    countSubstring(text, "提交") +
+    countSubstring(text, "报名");
+
+  // 极强信号：短文本里出现 ≥4 个“请于”
+  if (qingyu >= 4 && text.length > 100) return true;
+
+  // 中长文本 + 多个截止动作
+  if (text.length > 400 && qingyu >= 2) return true;
+  if (text.length > 400 && deadlineWords >= 3) return true;
+
+  // 无论内容，超长一律拒绝
+  if (text.length > 1000) return true;
+
+  return false;
 }
 
 /**
@@ -108,11 +140,9 @@ export function splitNotices(raw) {
     return { ok: true, items, method: "header" };
   }
 
-  // 策略3：像单条，原样返回
+  // 策略3：看起来像单条，原样返回；看起来像多条但切不开，报错
   if (blocks.length === 1) {
-    const suspicious =
-      text.length > 800 && countSubstring(text, "请于") >= 2;
-    if (suspicious) {
+    if (looksLikeMultipleNotices(text)) {
       return {
         ok: false,
         reason:
@@ -134,7 +164,6 @@ export function normalizeForDedup(text) {
 
 /**
  * 判断 text 是否与列表中任一通知重复。
- * notices 的每一项需有 .text 字段。
  */
 export function isDuplicate(text, notices) {
   const target = normalizeForDedup(text);

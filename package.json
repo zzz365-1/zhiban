@@ -7,7 +7,6 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "check:key": "node scripts/check-api-key.mjs",
     "test:extract": "node scripts/test-extract.mjs",
     "test:calendar": "node scripts/test-calendar.mjs",
     "test:relative": "node scripts/test-relative-dates.mjs",
