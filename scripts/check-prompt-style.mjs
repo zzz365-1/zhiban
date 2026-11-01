@@ -5,12 +5,14 @@
  * 不能用 split 取第一个代码块——历史上有三份文档在背景里放了
  * 终端输出或 diff，导致取块错位（Dec-033 第三次踩到）。
  *
- * 允许的字符：汉字、ASCII 字母数字、空格、换行、中文逗号句号问号、中文引号。
+ * 允许的字符：汉字、ASCII 字母数字、空格、换行、中文逗号句号问号。
+ * 注意：中文引号「」自 2026-11-01 起也列入禁用，示例文本要靠口语自然嵌入句子，
+ *      不再靠引号标注边界。此前一直当作例外，是规则记错了。
  */
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
-const ALLOWED = new Set(["，", "。", "？", "「", "」"]);
+const ALLOWED = new Set(["，", "。", "？"]);
 
 function isAllowed(ch) {
   if (ALLOWED.has(ch)) return true;
