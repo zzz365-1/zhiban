@@ -217,6 +217,10 @@ const MATERIAL_WORDS = [
   "选民证", "户口本", "工作证", "团员证", "党费证",
   "黑色笔", "签字笔", "黑色签字笔", "铅笔", "钢笔",
   "作品", "文件", "证明", "证件", "回执", "汇总表", "登记表",
+  // 常见复合材料名
+  "身份证复印件", "学生证复印件", "户口本复印件",
+  "一寸照片", "二寸照片", "一寸免冠照片", "二寸免冠照片",
+  "免冠照片", "证件照",
 ];
 
 const ACTION_RE = new RegExp(
@@ -224,6 +228,7 @@ const ACTION_RE = new RegExp(
 );
 
 const QUANTIFIER_CHARS = "支张份个本件套盒把台部只条枚页瓶包块片";
+const NUMBER_CHARS = "0123456789一二三四五六七八九十两几";
 
 const PUNCT_CHARS = "。，、；：！？.,;:!?（）()【】「」《》<>";
 
@@ -231,12 +236,18 @@ const LEADING_STOP_RE = new RegExp(
   "^(?:到|至|去|在|将|把|交|送|带|携|须|需|应|该|了|的|请|并|或)"
 );
 
+// 尾部地点介词短语：到现场 / 在学校 / 至办公室 …
+const TRAILING_PLACE_RE = new RegExp(
+  "[到在至去](?:现场|学校|教室|办公室|会场|门口|大厅|前台|服务台|报到处|签到处|座位|位置)"
+);
+
+// 提示语词：本身不是材料，只是引出清单的说明
+const HINT_WORDS = ["材料", "附件", "文件"];
+const HINT_FOLLOW = ["：", ":", "包括", "如下", "有", "含"];
+
 const RE_PAREN_CN = new RegExp("（[^（）]*）", "g");
 const RE_PAREN_EN = new RegExp("[（(][^()（）]*[）)]", "g");
 
-/**
- * 去掉成对的括号及其内容。循环 5 次处理嵌套；校园通知一般不嵌套。
- */
 function stripParentheses(text) {
   let result = String(text || "");
   for (let i = 0; i < 5; i++) {
@@ -248,9 +259,6 @@ function stripParentheses(text) {
   return result;
 }
 
-/**
- * 去掉首尾标点。用字符集 + 双指针，避免构造带转义的正则。
- */
 function trimPunctuation(s) {
   let start = 0;
   let end = s.length;
@@ -265,13 +273,22 @@ function cleanMaterialItem(s) {
 
   t = trimPunctuation(t);
 
+  // 数量词：数字 + 量词，量词必须存在。
+  // “一寸照片”的“寸”不是量词，整条不匹配，保留原样。
   t = t.replace(
-    new RegExp("^[0-9一二三四五六七八九十]+[" + QUANTIFIER_CHARS + "]?"),
+    new RegExp("^[" + NUMBER_CHARS + "]+[" + QUANTIFIER_CHARS + "]"),
     ""
   );
 
   t = t.replace(new RegExp("等$"), "");
   t = trimPunctuation(t.trim());
+
+  // 截断尾部“到现场/在学校/至办公室”这类地点介词短语
+  const placeMatch = t.match(TRAILING_PLACE_RE);
+  if (placeMatch && placeMatch.index > 0) {
+    t = t.slice(0, placeMatch.index).trim();
+    t = trimPunctuation(t);
+  }
 
   if (t.length < 1 || t.length > 20) return null;
   if (LEADING_STOP_RE.test(t)) return null;
@@ -279,14 +296,27 @@ function cleanMaterialItem(s) {
 }
 
 /**
- * 收集白名单候选，记录每个命中的位置区间。
- * 上下文过滤和上一版一致：命中词附近要有动作词或另一个材料词。
+ * 判断某个词在当前位置是否是提示语（不是材料本身）。
+ * 例：“需提交材料：”里的“材料”后面紧跟冒号，是提示语。
  */
+function isHintWordAt(text, word, idx) {
+  if (!HINT_WORDS.includes(word)) return false;
+  const after = text.slice(idx + word.length, idx + word.length + 4);
+  for (const f of HINT_FOLLOW) {
+    if (after.startsWith(f)) return true;
+  }
+  return false;
+}
+
 function collectMaterialCandidates(text) {
   const candidates = [];
   for (const word of MATERIAL_WORDS) {
     let idx = text.indexOf(word);
     while (idx !== -1) {
+      if (isHintWordAt(text, word, idx)) {
+        idx = text.indexOf(word, idx + 1);
+        continue;
+      }
       const before = text.slice(Math.max(0, idx - 15), idx);
       const after = text.slice(
         idx + word.length,
@@ -307,15 +337,44 @@ function collectMaterialCandidates(text) {
 }
 
 /**
+ * 合并首尾相接的候选。
+ * “身份证”[8,11] + “复印件”[11,14] → “身份证复印件”[8,14]。
+ * 只在两个候选 end === start 时合并，中间有标点不会合并。
+ */
+function mergeAdjacentCandidates(candidates) {
+  let list = [...candidates];
+  let changed = true;
+  while (changed) {
+    changed = false;
+    outer: for (let i = 0; i < list.length; i++) {
+      for (let j = 0; j < list.length; j++) {
+        if (i === j) continue;
+        if (list[i].end === list[j].start) {
+          const mergedWord = list[i].word + list[j].word;
+          if (mergedWord.length <= 20) {
+            const merged = {
+              word: mergedWord,
+              start: list[i].start,
+              end: list[j].end,
+            };
+            list = list.filter((_, k) => k !== i && k !== j);
+            list.push(merged);
+            changed = true;
+            break outer;
+          }
+        }
+      }
+    }
+  }
+  return list;
+}
+
+/**
  * 位置感知去重：
- *   - 按长度降序处理候选
- *   - 候选的每次出现如果完全落在某个已保留的更长候选的区间内，跳过该次出现
+ *   - 按长度降序处理
+ *   - 候选的这次出现如果完全落在已保留的更长候选区间内，跳过
  *   - 至少有一次出现未被覆盖的词才保留
  *   - 保留的词按首次出现位置排序
- *
- * 效果：
- *   "身份证和身份证复印件" → 身份证[2,4] 独立，复印件[12,15] 被身份证复印件[8,15] 覆盖
- *   → 结果：身份证、身份证复印件
  */
 function dedupeCandidates(candidates) {
   const sorted = [...candidates].sort(
@@ -325,6 +384,11 @@ function dedupeCandidates(candidates) {
   const keptWords = [];
 
   for (const c of sorted) {
+    if (c.start < 0 || c.end < 0) {
+      // 无法定位的候选单独保留
+      if (!keptWords.includes(c.word)) keptWords.push(c.word);
+      continue;
+    }
     const isCovered = covered.some(
       (r) => c.start >= r.start && c.end <= r.end
     );
@@ -335,11 +399,16 @@ function dedupeCandidates(candidates) {
 
   const firstIndex = {};
   for (const c of candidates) {
+    if (c.start < 0) continue;
     if (!(c.word in firstIndex) || c.start < firstIndex[c.word]) {
       firstIndex[c.word] = c.start;
     }
   }
-  return keptWords.sort((a, b) => firstIndex[a] - firstIndex[b]);
+  return keptWords.sort((a, b) => {
+    const ai = a in firstIndex ? firstIndex[a] : Number.MAX_SAFE_INTEGER;
+    const bi = b in firstIndex ? firstIndex[b] : Number.MAX_SAFE_INTEGER;
+    return ai - bi;
+  });
 }
 
 function extractCarryItems(text) {
@@ -354,7 +423,6 @@ function extractCarryItems(text) {
 
   let m;
   while ((m = CARRY_RE.exec(text)) !== null) {
-    // 先去掉括号内容再分割，避免括号里的逗号切出碎片
     const cleaned = stripParentheses(m[1]);
     const parts = cleaned.split(SPLIT_RE);
     for (const p of parts) {
@@ -367,19 +435,16 @@ function extractCarryItems(text) {
 
 function extractMaterials(text) {
   const noParens = stripParentheses(text);
-  const candidates = [];
+  let candidates = [];
 
-  // 1. 白名单扫描（在去括号文本上）
-  for (const c of collectMaterialCandidates(noParens)) {
-    candidates.push(c);
-  }
+  // 1. 白名单扫描（去括号文本上）
+  candidates = candidates.concat(collectMaterialCandidates(noParens));
 
-  // 2. 携带清单：在原文上抽取，然后在 noParens 上定位
+  // 2. 携带清单：原文抽取，去括号文本定位
   const carryItems = extractCarryItems(text);
   for (const item of carryItems) {
     let idx = noParens.indexOf(item);
     if (idx === -1) {
-      // 携带项在去括号文本里找不到（罕见），单独作为候选
       candidates.push({ word: item, start: -1, end: -1 });
     } else {
       while (idx !== -1) {
@@ -389,7 +454,7 @@ function extractMaterials(text) {
     }
   }
 
-  // 3. 列举式：同样在 noParens 上定位
+  // 3. 列举式：去括号文本定位
   const listMatch = text.match(
     new RegExp(
       "(?:材料|附件)[ ]*(?:包括|如下|有|含|：|:)[ ]*([^" + LF + "。；;]{1,80})"
@@ -414,8 +479,9 @@ function extractMaterials(text) {
     }
   }
 
-  // 4. 位置感知去重
-  return dedupeCandidates(candidates);
+  // 4. 合并首尾相接的候选，再位置感知去重
+  const merged = mergeAdjacentCandidates(candidates);
+  return dedupeCandidates(merged);
 }
 
 // ---------- 面向对象 ----------
