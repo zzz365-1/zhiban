@@ -1,390 +1,377 @@
 /**
- * 端到端断言测试
+ * 相对日期换算 自检（纯本地，不联网，不需要密钥）
  * 用法：node scripts/test-relative-dates.mjs
  *
- * 完全模拟 page.js 里 handleParse 的逻辑：
- *   - 本地规则 → isRuleResultGood → 够好用规则，不够好调 AI → mergeAIResult
+ * 引用页面真实模块：
+ *   ../app/lib/relativeDate.js   （本地换算）
+ *   ../app/lib/extractNotice.js  （本地抽取）
  *
- * 相对日期的期望值全部由函数根据“今天”动态计算，不写死。
+ * 覆盖：
+ *   - 今天/明天/后天/大后天
+ *   - 下周一 ~ 下周日（含“下周天”），从不同 today 出发
+ *   - 本周X / 这周X（已过则顺延）
+ *   - 本月底/本月初/下月底/下月初
+ *   - 本月X日 / 下月X日
+ *   - 跨月（1月31日 → 2月1日）、跨年（12月31日 → 1月1日）
+ *   - 闰年（2024-02 有 29 天）
+ *   - 星期日算「下周三」不会跳一周
+ *   - 算不出来返回 null，不猜
+ *   - extractNotice + resolveRelativeDate 组合
+ *   - 金丝雀：把周日当一周第一天的坏实现，断言必须拒绝
  */
 
-import { readFileSync } from "node:fs";
-import { buildMessages } from "../app/lib/parsePrompt.js";
+import { resolveRelativeDate } from "../app/lib/relativeDate.js";
 import { extractNotice } from "../app/lib/extractNotice.js";
-import { isRuleResultGood, mergeAIResult } from "../app/lib/aiExtract.js";
 
-const LF = String.fromCharCode(10);
-
-// ---------- 读取 .env.local ----------
-
-function loadEnv() {
-  try {
-    const content = readFileSync(".env.local", "utf8");
-    for (const line of content.split(LF)) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith("#")) continue;
-      const eq = trimmed.indexOf("=");
-      if (eq === -1) continue;
-      const key = trimmed.slice(0, eq).trim();
-      let value = trimmed.slice(eq + 1).trim();
-      if (
-        (value.startsWith('"') && value.endsWith('"')) ||
-        (value.startsWith("'") && value.endsWith("'"))
-      ) {
-        value = value.slice(1, -1);
-      }
-      process.env[key] = value;
-    }
-  } catch {
-    console.warn("未找到 .env.local，AI 调用会失败。");
-  }
+function eq(a, b) {
+  return a === b;
 }
 
-loadEnv();
-const API_KEY = process.env.DEEPSEEK_API_KEY;
-
-// ---------- 日期工具 ----------
-
-function formatCN(date) {
-  return (
-    date.getFullYear() +
-    "年" +
-    (date.getMonth() + 1) +
-    "月" +
-    date.getDate() +
-    "日"
-  );
+function d(y, m, day) {
+  return new Date(y, m - 1, day);
 }
 
-function addDays(date, n) {
-  const d = new Date(date);
-  d.setDate(d.getDate() + n);
-  return d;
+function resolveOrNull(text, now) {
+  const r = resolveRelativeDate(text, now);
+  return r ? r.normalized : null;
 }
 
-/**
- * 下一个目标星期几（用于“本周X”已过则顺延）。
- * target 用 getDay() 值：0=周日 ... 6=周六。
- */
-function nextWeekday(today, target) {
-  const d = new Date(today);
-  const cur = d.getDay();
-  let delta = target - cur;
-  if (delta <= 0) delta += 7;
-  d.setDate(d.getDate() + delta);
-  return d;
-}
-
-/**
- * 下一周的某个星期几（一周从周一开始，周日是最后一天）。
- * target: 1=周一 ... 7=周日。
- *
- * 今天周日、target=3（周三）→ 3 天后（下周三）
- * 今天周一、target=3（周三）→ 9 天后（下周三）
- * 今天周三、target=3（周三）→ 7 天后（下周三）
- */
-function nextWeekWeekday(today, target) {
-  const d = new Date(today);
-  const mondayBased = (d.getDay() + 6) % 7; // 0=周一 ... 6=周日
-  const daysToNextMonday = 7 - mondayBased;
-  d.setDate(d.getDate() + daysToNextMonday + (target - 1));
-  return d;
-}
-
-function normalizeDate(s) {
-  if (s === null || s === undefined) return null;
-  const str = String(s).trim();
-  if (str === "") return null;
-  const m = str.match(/([0-9]{4})[^0-9]*([0-9]{1,2})[^0-9]*([0-9]{1,2})/);
-  if (!m) return str;
-  return (
-    m[1] +
-    "-" +
-    String(m[2]).padStart(2, "0") +
-    "-" +
-    String(m[3]).padStart(2, "0")
-  );
-}
-
-function isStrictlyEmpty(s) {
-  if (s === null || s === undefined) return true;
-  return String(s).trim() === "";
-}
-
-const RE_STANDARD_DATE = new RegExp("^[0-9]{4}-[0-9]{2}-[0-9]{2}$");
-
-function compareDates(actualRaw, expectedRaw) {
-  if (isStrictlyEmpty(expectedRaw)) {
-    return isStrictlyEmpty(actualRaw);
-  }
-  if (isStrictlyEmpty(actualRaw)) return false;
-  const actualNorm = normalizeDate(actualRaw);
-  const expectedNorm = normalizeDate(expectedRaw);
-  if (actualNorm === null || !RE_STANDARD_DATE.test(actualNorm)) return false;
-  if (expectedNorm === null || !RE_STANDARD_DATE.test(expectedNorm)) return false;
-  return actualNorm === expectedNorm;
-}
-
-// ---------- 调用 DeepSeek ----------
-
-async function callAI(text) {
-  if (!API_KEY) throw new Error("缺少 DEEPSEEK_API_KEY");
-
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 20000);
-
-  try {
-    const res = await fetch("https://api.deepseek.com/chat/completions", {
-      method: "POST",
-      signal: controller.signal,
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: "Bearer " + API_KEY,
-      },
-      body: JSON.stringify({
-        model: "deepseek-flash",
-        stream: false,
-        thinking: { type: "disabled" },
-        max_tokens: 1024,
-        temperature: 0,
-        response_format: { type: "json_object" },
-        messages: buildMessages(text),
-      }),
-    });
-
-    clearTimeout(timeout);
-
-    if (!res.ok) {
-      const detail = await res.text().catch(() => "");
-      throw new Error("HTTP " + res.status + ": " + detail.slice(0, 150));
-    }
-
-    const data = await res.json();
-    const content = data?.choices?.[0]?.message?.content;
-    if (!content || !content.trim()) throw new Error("空返回");
-    return JSON.parse(content);
-  } catch (e) {
-    clearTimeout(timeout);
-    throw e;
-  }
-}
-
-async function resolveFinal(text) {
-  const rule = extractNotice(text);
-
-  if (isRuleResultGood(rule)) {
-    return { final: { ...rule, _source: "rule" }, usedAI: false, aiError: null };
-  }
-
-  try {
-    const ai = await callAI(text);
-    return { final: mergeAIResult(rule, ai), usedAI: true, aiError: null };
-  } catch (e) {
-    return {
-      final: { ...rule, _source: "rule_fallback" },
-      usedAI: true,
-      aiError: e.message,
-    };
-  }
-}
-
-// ---------- 测试用例 ----------
-// expected 一律是函数 (today) => "YYYY年M月D日" | null
-// 涉及相对日期的用例用 addDays / nextWeekday / nextWeekWeekday 动态计算。
-// 原文里明确写出具体日期的用例（消防演练、图像采集等）写死是合理的。
+// 基准日期
+const NOW_SUNDAY = d(2026, 11, 1);     // 2026-11-01 周日
+const NOW_MONDAY = d(2026, 11, 2);     // 2026-11-02 周一
+const NOW_WEDNESDAY = d(2026, 11, 4);  // 2026-11-04 周三
+const NOW_SATURDAY = d(2026, 11, 7);   // 2026-11-07 周六
+const NOW_JAN31 = d(2026, 1, 31);      // 2026-01-31 周六
+const NOW_DEC31 = d(2025, 12, 31);     // 2025-12-31 周三
+const NOW_FEB01 = d(2024, 2, 1);       // 2024-02-01 周四（闰年）
+const NOW_FEB28 = d(2026, 2, 28);      // 2026-02-28 周六（平年）
 
 const CASES = [
+  // --- 今天/明天/后天/大后天 ---
   {
-    name: "明天",
-    text: "请于明天中午12点前将名单报送至教务处A301办公室。",
-    expected: (today) => formatCN(addDays(today, 1)),
+    name: "今天（2026-11-01）",
+    actual: () => resolveOrNull("今天", NOW_SUNDAY),
+    expected: "2026年11月1日",
   },
   {
-    name: "本周五（今天已过周五则顺延）",
-    text: "请于本周五前到宿舍管理中心值班室登记领取。",
-    expected: (today) => formatCN(nextWeekday(today, 5)),
+    name: "明天（2026-11-01）",
+    actual: () => resolveOrNull("明天", NOW_SUNDAY),
+    expected: "2026年11月2日",
   },
   {
-    name: "本月25日（今天已过25日则为空）",
-    text: "请欠费同学务必于本月25日前完成缴费。",
-    expected: (today) =>
-      today.getDate() <= 25
-        ? formatCN(new Date(today.getFullYear(), today.getMonth(), 25))
-        : null,
+    name: "后天（2026-11-01）",
+    actual: () => resolveOrNull("后天", NOW_SUNDAY),
+    expected: "2026年11月3日",
   },
   {
-    name: "下周三（按周一开始计算一周）",
-    text: "学校定于下周三下午3点在就业指导中心会议室召开就业推进会。",
-    expected: (today) => formatCN(nextWeekWeekday(today, 3)),
+    name: "大后天（2026-11-01）",
+    actual: () => resolveOrNull("大后天", NOW_SUNDAY),
+    expected: "2026年11月4日",
+  },
+
+  // --- 星期日算「下周三」不跳一周 ---
+  {
+    name: "今天周日（2026-11-01），下周三 = 11月4日（不是 11 月 11 日）",
+    actual: () => resolveOrNull("下周三", NOW_SUNDAY),
+    expected: "2026年11月4日",
   },
   {
-    name: "大后天",
-    text: "请于大后天上午10点前将材料提交至行政楼A208办公室。",
-    expected: (today) => formatCN(addDays(today, 3)),
+    name: "今天周日（2026-11-01），下周一 = 11月2日",
+    actual: () => resolveOrNull("下周一", NOW_SUNDAY),
+    expected: "2026年11月2日",
   },
   {
-    name: "消防演练（原文具体日期 2026-11-02）",
-    text: `关于组织开展2026年秋季校园消防安全演练的通知
-一、演练时间：2026年11月2日15:00
-二、集合地点：图书馆南广场
-请各班班长于当日12:00前将本班参会名单报送至辅导员处。`,
-    expected: () => "2026年11月2日",
+    name: "今天周日（2026-11-01），下周日 = 11月8日",
+    actual: () => resolveOrNull("下周日", NOW_SUNDAY),
+    expected: "2026年11月8日",
   },
   {
-    name: "图像采集（原文具体日期 2026-11-20）",
-    text: "毕业生学历图像信息采集定于2026年11月20日上午8:30在大学生活动中心一层大厅进行。",
-    expected: () => "2026年11月20日",
+    name: "今天周日（2026-11-01），下周天 = 11月8日",
+    actual: () => resolveOrNull("下周天", NOW_SUNDAY),
+    expected: "2026年11月8日",
+  },
+
+  // --- 从周一看下周 ---
+  {
+    name: "今天周一（2026-11-02），下周三 = 11月11日",
+    actual: () => resolveOrNull("下周三", NOW_MONDAY),
+    expected: "2026年11月11日",
   },
   {
-    name: "新生复查（原文具体日期 2026-11-12）",
-    text: "请各学院于2026年11月12日17:00前将汇总表报送至行政楼A208学籍管理办公室。",
-    expected: () => "2026年11月12日",
+    name: "今天周三（2026-11-04），下周三 = 11月11日",
+    actual: () => resolveOrNull("下周三", NOW_WEDNESDAY),
+    expected: "2026年11月11日",
   },
   {
-    name: "读书月（活动 11-08，截止 11-06）",
-    text: "图书馆定于2026年11月8日9:00在图书馆一楼多功能厅举办读书月开幕式。请有意参加的同学以班级为单位填写登记表，由班长统一于2026年11月6日12:00前发至邮箱。",
-    expected: () => "2026年11月6日",
+    name: "今天周六（2026-11-07），下周三 = 11月11日",
+    actual: () => resolveOrNull("下周三", NOW_SATURDAY),
+    expected: "2026年11月11日",
+  },
+
+  // --- 本周X / 这周X ---
+  {
+    name: "今天周日（2026-11-01），本周日 = 今天 11月1日",
+    actual: () => resolveOrNull("本周日", NOW_SUNDAY),
+    expected: "2026年11月1日",
   },
   {
-    name: "自习室（无截止日期）",
-    text: "为配合冬季用电管理，三楼自习室开放时间自即日起调整为每日8:00至22:30。",
-    expected: () => null,
+    name: "今天周日（2026-11-01），这周日 = 今天 11月1日",
+    actual: () => resolveOrNull("这周日", NOW_SUNDAY),
+    expected: "2026年11月1日",
   },
   {
-    name: "创新创业（活动 11-28，截止 11-25）",
-    text: "学校定于2026年11月28日14:00在大学生创新创业中心二楼报告厅举行中期答辩。各项目组须于2026年11月25日17:00前提交中期进展报告。",
-    expected: () => "2026年11月25日",
+    name: "今天周日（2026-11-01），本周三已过 → 顺延 11月4日",
+    actual: () => resolveOrNull("本周三", NOW_SUNDAY),
+    expected: "2026年11月4日",
   },
   {
-    name: "马拉松（活动 11-30，截止 11-27）",
-    text: "校工会定于2026年11月30日上午在东体育场举行第七届校园马拉松。请各单位于2026年11月27日前将参赛名单汇总报送至体育部。",
-    expected: () => "2026年11月27日",
+    name: "今天周一（2026-11-02），本周三 = 11月4日",
+    actual: () => resolveOrNull("本周三", NOW_MONDAY),
+    expected: "2026年11月4日",
   },
   {
-    name: "防寒物资（本周五，已过则顺延）",
-    text: "请各宿舍长于本周五前到宿舍管理中心值班室登记领取。",
-    expected: (today) => formatCN(nextWeekday(today, 5)),
+    name: "今天周三（2026-11-04），本周三 = 今天 11月4日",
+    actual: () => resolveOrNull("本周三", NOW_WEDNESDAY),
+    expected: "2026年11月4日",
+  },
+
+  // --- 本月底/月初 ---
+  {
+    name: "本月底（2026-11-01）= 11月30日",
+    actual: () => resolveOrNull("本月底", NOW_SUNDAY),
+    expected: "2026年11月30日",
   },
   {
-    name: "就业推进会（下周三，按周一开始计算）",
-    text: "学校定于下周三下午3点在就业指导中心会议室召开就业推进会。",
-    expected: (today) => formatCN(nextWeekWeekday(today, 3)),
+    name: "本月末（2026-11-01）= 11月30日",
+    actual: () => resolveOrNull("本月末", NOW_SUNDAY),
+    expected: "2026年11月30日",
   },
   {
-    name: "宿舍隐患（本月底）",
-    text: "请各楼栋长于本月底前完成自查，并将排查结果表报送至保卫处值班室。",
-    expected: (today) =>
-      formatCN(new Date(today.getFullYear(), today.getMonth() + 1, 0)),
+    name: "本月初（2026-11-01）= 11月1日",
+    actual: () => resolveOrNull("本月初", NOW_SUNDAY),
+    expected: "2026年11月1日",
   },
   {
-    name: "催缴学费（本月25日）",
-    text: "请欠费同学务必于本月25日前完成缴费，逾期将影响选课。",
-    expected: (today) =>
-      today.getDate() <= 25
-        ? formatCN(new Date(today.getFullYear(), today.getMonth(), 25))
-        : null,
+    name: "下月底（2026-11-01）= 12月31日",
+    actual: () => resolveOrNull("下月底", NOW_SUNDAY),
+    expected: "2026年12月31日",
   },
   {
-    name: "今天",
-    text: "请于今天下午5点前将表格交至行政楼101室。",
-    expected: (today) => formatCN(today),
+    name: "下月初（2026-11-01）= 12月1日",
+    actual: () => resolveOrNull("下月初", NOW_SUNDAY),
+    expected: "2026年12月1日",
   },
   {
-    name: "下周一（按周一开始计算）",
-    text: "请于下周一上午9点前提交电子版至邮箱。",
-    expected: (today) => formatCN(nextWeekWeekday(today, 1)),
+    name: "本月底（2026-01-31）= 1月31日",
+    actual: () => resolveOrNull("本月底", NOW_JAN31),
+    expected: "2026年1月31日",
+  },
+  {
+    name: "下月底（2026-01-31）= 2月28日（平年）",
+    actual: () => resolveOrNull("下月底", NOW_JAN31),
+    expected: "2026年2月28日",
+  },
+  {
+    name: "本月底（2024-02-01 闰年）= 2月29日",
+    actual: () => resolveOrNull("本月底", NOW_FEB01),
+    expected: "2024年2月29日",
+  },
+  {
+    name: "本月底（2026-02-28 平年）= 2月28日",
+    actual: () => resolveOrNull("本月底", NOW_FEB28),
+    expected: "2026年2月28日",
+  },
+
+  // --- 本月X日 / 下月X日 ---
+  {
+    name: "本月25日（2026-11-01，未过）= 11月25日",
+    actual: () => resolveOrNull("本月25日", NOW_SUNDAY),
+    expected: "2026年11月25日",
+  },
+  {
+    name: "下月25日（2026-11-01）= 12月25日",
+    actual: () => resolveOrNull("下月25日", NOW_SUNDAY),
+    expected: "2026年12月25日",
+  },
+  {
+    name: "本月25日（2026-11-25 已过）= null（不猜）",
+    actual: () => resolveOrNull("本月25日", d(2026, 11, 26)),
+    expected: null,
+  },
+  {
+    name: "下月31日（2026-11-01，12月有31日）= 12月31日",
+    actual: () => resolveOrNull("下月31日", NOW_SUNDAY),
+    expected: "2026年12月31日",
+  },
+  {
+    name: "下月31日（2026-01-01，2月没有31日）= null",
+    actual: () => resolveOrNull("下月31日", d(2026, 1, 1)),
+    expected: null,
+  },
+
+  // --- 跨月：1月31日 → 明天是2月1日 ---
+  {
+    name: "跨月：2026-01-31 的明天 = 2月1日",
+    actual: () => resolveOrNull("明天", NOW_JAN31),
+    expected: "2026年2月1日",
+  },
+  {
+    name: "跨月：2026-01-31 的下周三 = 2月4日",
+    actual: () => resolveOrNull("下周三", NOW_JAN31),
+    expected: "2026年2月4日",
+  },
+
+  // --- 跨年：12月31日 → 明天是1月1日 ---
+  {
+    name: "跨年：2025-12-31 的明天 = 2026年1月1日",
+    actual: () => resolveOrNull("明天", NOW_DEC31),
+    expected: "2026年1月1日",
+  },
+  {
+    name: "跨年：2025-12-31 的下周一 = 2026年1月5日",
+    actual: () => resolveOrNull("下周一", NOW_DEC31),
+    expected: "2026年1月5日",
+  },
+  {
+    name: "跨年：2025-12-31 的下月底 = 2026年1月31日",
+    actual: () => resolveOrNull("下月底", NOW_DEC31),
+    expected: "2026年1月31日",
+  },
+
+  // --- 算不出来返回 null，不猜 ---
+  {
+    name: "「下周」单独 = null（不猜）",
+    actual: () => resolveOrNull("下周", NOW_SUNDAY),
+    expected: null,
+  },
+  {
+    name: "「月底」没说哪个月 = null",
+    actual: () => resolveOrNull("月底", NOW_SUNDAY),
+    expected: null,
+  },
+  {
+    name: "「近期」= null",
+    actual: () => resolveOrNull("近期", NOW_SUNDAY),
+    expected: null,
+  },
+  {
+    name: "「过几天」= null",
+    actual: () => resolveOrNull("过几天", NOW_SUNDAY),
+    expected: null,
+  },
+  {
+    name: "空字符串 = null",
+    actual: () => resolveOrNull("", NOW_SUNDAY),
+    expected: null,
+  },
+
+  // --- extractNotice + resolveRelativeDate 组合 ---
+  {
+    name: "组合：原文「下周三前交」本地抽出「下周三」并换算",
+    actual: () => {
+      const text = "请于下周三前将材料交至A101。";
+      const rule = extractNotice(text);
+      const resolved = resolveRelativeDate(rule.deadline, NOW_SUNDAY);
+      return resolved ? resolved.normalized : null;
+    },
+    expected: "2026年11月4日",
+  },
+  {
+    name: "组合：原文「明天中午12点前交」本地抽出「明天」并换算",
+    actual: () => {
+      const text = "请于明天中午12点前将材料交至A101。";
+      const rule = extractNotice(text);
+      const resolved = resolveRelativeDate(rule.deadline, NOW_SUNDAY);
+      return resolved ? resolved.normalized : null;
+    },
+    expected: "2026年11月2日",
+  },
+  {
+    name: "组合：原文「本月底前完成缴费」本地抽出「本月底」并换算",
+    actual: () => {
+      const text = "请于本月底前完成缴费。";
+      const rule = extractNotice(text);
+      const resolved = resolveRelativeDate(rule.deadline, NOW_SUNDAY);
+      return resolved ? resolved.normalized : null;
+    },
+    expected: "2026年11月30日",
   },
 ];
 
 // ---------- 金丝雀 ----------
 
+/**
+ * 坏实现：把星期日当作一周的第一天（错误）。
+ * 对「今天周日（2026-11-01），下周三」会算成 11月11日，
+ * 正确应为 11月4日。
+ * 如果断言把这个错值当成正确，说明断言坏了。
+ */
+function brokenResolveNextWednesday(now) {
+  const sundayBased = now.getDay(); // 0=周日
+  const target = 3; // 周三
+  let delta = target - sundayBased;
+  if (delta <= 0) delta += 7;
+  // 错误：只加了一周，没有正确理解“下周”
+  const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + delta + 7);
+  return (
+    d.getFullYear() + "年" + (d.getMonth() + 1) + "月" + d.getDate() + "日"
+  );
+}
+
 function runCanary() {
-  const garbage = ["在校生", "行政楼", "本周", "本月", "2026年13月45日", "abc", "2026"];
-  console.log("[金丝雀] 喂垃圾值给日期比较逻辑，期望全部被拒绝（FAIL）");
-  let broken = false;
-  for (const g of garbage) {
-    const wouldPass = compareDates(g, null);
-    if (wouldPass) {
-      console.log('    BROKEN - 垃圾值 "' + g + '" 被错误判为 PASS');
-      broken = true;
-    } else {
-      console.log('    拒绝 "' + g + '" → 判定 FAIL（正确）');
-    }
-  }
-  if (broken) {
+  const correct = resolveOrNull("下周三", NOW_SUNDAY);
+  const expected = "2026年11月4日";
+  const broken = brokenResolveNextWednesday(NOW_SUNDAY);
+
+  console.log("[金丝雀] 用周日作为一周第一天的坏实现，断言必须拒绝");
+  console.log("    正确实现：" + JSON.stringify(correct));
+  console.log("    坏实现：" + JSON.stringify(broken));
+  console.log("    期望：" + JSON.stringify(expected));
+
+  const wouldPass = eq(broken, expected);
+  if (wouldPass) {
+    console.log("    BROKEN - 坏实现被错误判为与期望相等");
     console.log("    结论：异常 PASS - 断言逻辑已坏！");
     return false;
   }
+  console.log("    断言判定为 FAIL（正确）");
   console.log("    结论：按预期 FAIL - 断言逻辑正常");
   return true;
 }
 
 // ---------- 主流程 ----------
 
-async function main() {
-  const today = new Date();
+let pass = 0;
+let fail = 0;
+
+for (let i = 0; i < CASES.length; i++) {
+  const c = CASES[i];
+  const actual = c.actual();
+  const ok = eq(actual, c.expected);
+
+  if (ok) pass++;
+  else fail++;
+
   console.log(
-    "今天：" +
-      formatCN(today) +
-      "（周" +
-      "日一二三四五六"[today.getDay()] +
-      "）"
+    "[" + (i + 1) + "/" + CASES.length + "] " +
+      (ok ? "PASS" : "FAIL") + " - " + c.name
   );
+  console.log("    期望：" + JSON.stringify(c.expected));
+  console.log("    实际：" + JSON.stringify(actual));
   console.log("");
-
-  if (!API_KEY) {
-    console.log("FAIL - 缺少 DEEPSEEK_API_KEY，无法测试。");
-    process.exitCode = 1;
-    return;
-  }
-
-  let pass = 0;
-  let fail = 0;
-
-  for (let i = 0; i < CASES.length; i++) {
-    const c = CASES[i];
-    const expectedRaw = c.expected(today);
-
-    const { final, usedAI, aiError } = await resolveFinal(c.text);
-    const actualRaw = final.deadline || null;
-    const ok = compareDates(actualRaw, expectedRaw);
-
-    if (ok) pass++;
-    else fail++;
-
-    const sourceTag = usedAI
-      ? aiError
-        ? "AI 失败→本地"
-        : "AI 兜底"
-      : "本地规则";
-
-    console.log(
-      "[" + (i + 1) + "/" + (CASES.length + 1) + "] " +
-        (ok ? "PASS" : "FAIL") + " - " + c.name + "  (" + sourceTag + ")"
-    );
-    console.log("    期望：" + (expectedRaw === null ? "(空)" : expectedRaw));
-    console.log("    实际：" + (actualRaw === null ? "(空)" : actualRaw));
-
-    if (aiError) console.log("    AI 错误：" + aiError);
-    if (!ok) {
-      const snippet = c.text.slice(0, 60).split(LF).join(" ");
-      console.log("    原文：" + snippet + " …");
-    }
-    console.log("");
-  }
-
-  const canaryOk = runCanary();
-  console.log("");
-
-  console.log(
-    "业务结果：" + pass + " 通过 / " + fail + " 失败 / 共 " + CASES.length + " 条"
-  );
-  console.log(
-    "金丝雀结果：" +
-      (canaryOk ? "按预期 FAIL（断言逻辑正常）" : "异常 PASS（断言逻辑已坏）")
-  );
-
-  if (fail > 0 || !canaryOk) process.exitCode = 1;
 }
 
-main();
+const canaryOk = runCanary();
+console.log("");
+
+console.log(
+  "业务结果：" + pass + " 通过 / " + fail + " 失败 / 共 " + CASES.length + " 条"
+);
+console.log(
+  "金丝雀结果：" +
+    (canaryOk ? "按预期 FAIL（断言逻辑正常）" : "异常 PASS（断言逻辑已坏）")
+);
+
+if (fail > 0 || !canaryOk) {
+  process.exitCode = 1;
+}

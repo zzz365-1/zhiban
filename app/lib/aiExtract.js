@@ -50,22 +50,30 @@ export function isRuleResultGood(ruleResult) {
 /**
  * 合并 AI 结果。
  *
- * deadline/time：绑定为同一来源。
- * location：AI 优先，本地兜底。
- * audience：AI 优先，本地兜底（单值字段）。
+ * deadline/time 策略：
+ *   - 本地已通过相对日期换算确定了具体日期（_locallyResolved）→ 用本地的
+ *   - 否则 AI 给了 deadline → 用 AI 的（AI 只负责“选哪个日期”，不负责换算）
+ *   - 否则本地是模糊日期 → 留空
+ *   - 否则用本地的
+ *
+ * location / audience：AI 优先，本地兜底。
  * materials：整套用一边，绝不拼接。
- *   如果 AI 给了非空数组 → 整套用 AI
- *   否则 → 整套用本地
  */
 export function mergeAIResult(ruleResult, aiResult) {
   const base = ruleResult || {};
-  const baseDeadlineIsFuzzy = Boolean(base.deadline) && isFuzzyDate(base.deadline);
+  const baseDeadlineIsResolved =
+    Boolean(base._locallyResolved) && Boolean(base.deadline);
+  const baseDeadlineIsFuzzy =
+    Boolean(base.deadline) && isFuzzyDate(base.deadline);
 
   let deadline;
   let time;
   let inferred = false;
 
-  if (aiResult.deadline) {
+  if (baseDeadlineIsResolved) {
+    deadline = base.deadline;
+    time = base.time;
+  } else if (aiResult.deadline) {
     deadline = aiResult.deadline;
     time = aiResult.time || null;
     if (baseDeadlineIsFuzzy) inferred = true;
