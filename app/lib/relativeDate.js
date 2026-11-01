@@ -4,21 +4,27 @@
  * 【为什么不用 AI 算日期】
  * 模型的本质是概率预测，对“一周从哪天开始”“本月有没有 31 日”这类
  * 确定性的日历规则没有稳定认知。同一个输入可能今天对、明天错，
- * 而界面上完全看不出来。用户按错误的日期去办事，后果由用户承担。
- * 所以所有能确定换算的说法都在本地用纯函数做，AI 只负责“从原文里选
- * 哪个日期是用户要赶的”，不负责换算。
+ * 而界面上完全看不出来。所以所有能确定换算的说法都在本地用纯函数做，
+ * AI 只负责“从原文里选哪个日期是用户要赶的”。
  *
  * 一周从星期一开始，周日是最后一天。
  *
+ * 【为什么“X月”必须带“个”】
+ * “一月”“二月”“三月”……“十二月”本身也是月份名。“三月之后”可以理解为
+ * “三月份过完之后”，也可以理解为“三个月之后”，语义含糊。
+ * 所以只有带“个”的“X个月”才按时间长度处理；不带“个”的“X月后/内”
+ * 一律返回 null，交给 AI 兜底。宁可空着，也不要猜错。
+ *
  * 支持的说法：
- *   - 今天 / 明天 / 后天 / 大后天
- *   - 下周一 ~ 下周日（含“下周天”）
+ *   - 今天 / 明天 / 后天 / 大后天 / 次日 / 隔天 / 即日
+ *   - 下周一 ~ 下周日、下一周X、下个星期X、这个星期X（含“下周天”）
  *   - 本周X / 这周X / 本星期X / 这星期X（已过则顺延到下周）
  *   - 本月底 / 本月末 / 本月初 / 下月底 / 下月末 / 下月初
  *   - 本月X日 / 下月X日 / 本月X号 / 下月X号
  *   - X天内 / X天后 / X日内 / X日后 / 过X天
- *   - X周内 / X周后 / X个星期内 / X个星期后
- *   - X个月内 / X个月后 / X个年内 / X年后
+ *   - X周内 / X周后 / X个星期内 / X个星期后 / 过X周 / 过X个星期
+ *   - X个月内 / X个月后 / 过X个月
+ *   - X年内 / X年后 / 过X年
  *
  * 算不出来的返回 null，绝不猜测。
  * “一周后”按 7 个自然日计算，不是 5 个工作日。
@@ -32,9 +38,6 @@ const CN_DIGITS = {
   六: 6, 七: 7, 八: 8, 九: 9,
 };
 
-/**
- * 解析中文数字（一到九十九）或纯阿拉伯数字。无法解析返回 null。
- */
 function parseChineseNumber(s) {
   if (!s) return null;
   const str = String(s).trim();
@@ -69,7 +72,6 @@ function addDays(base, n) {
  * 加 n 个自然月。目标月没有对应日时退到该月最后一天。
  * 例：2026-01-31 + 1 个月 = 2026-02-28（平年）
  *     2024-01-31 + 1 个月 = 2024-02-29（闰年）
- *     2026-03-31 + 1 个月 = 2026-04-30
  */
 function addMonths(base, n) {
   const y = base.getFullYear();
@@ -108,23 +110,37 @@ export function resolveRelativeDate(text, now = new Date()) {
 
   const base = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
-  // 今天 / 明天 / 后天 / 大后天
-  const relDays = { 今天: 0, 明天: 1, 后天: 2, 大后天: 3 };
+  // 今天 / 明天 / 后天 / 大后天 / 次日 / 隔天 / 即日
+  const relDays = {
+    今天: 0, 即日: 0,
+    明天: 1, 次日: 1, 隔天: 1,
+    后天: 2,
+    大后天: 3,
+  };
   if (s in relDays) {
     const d = addDays(base, relDays[s]);
     return { date: d, normalized: formatCN(d) };
   }
 
-  // 下周X / 本周X / 这周X
-  const m1 = s.match(new RegExp("^(下|本|这)?(?:周|星期)([一二三四五六日天])$"));
+  // 下周X / 下一周X / 下个星期X / 这个星期X / 本周X / 这周X
+  const m1 = s.match(
+    new RegExp(
+      "^(下一周|下个星期|这个星期|这个周|下|本|这)?(?:周|星期)([一二三四五六日天])$"
+    )
+  );
   if (m1) {
-    const prefix = m1[1] || "本";
+    const rawPrefix = m1[1] || "本";
     const target = DAY_MAP[m1[2]];
     const mondayBased = (base.getDay() + 6) % 7;
     const targetMondayBased = (target + 6) % 7;
 
+    const isNext =
+      rawPrefix === "下" ||
+      rawPrefix === "下一周" ||
+      rawPrefix === "下个星期";
+
     let offset;
-    if (prefix === "下") {
+    if (isNext) {
       offset = 7 - mondayBased + targetMondayBased;
     } else {
       offset = -mondayBased + targetMondayBased;
@@ -189,14 +205,38 @@ export function resolveRelativeDate(text, now = new Date()) {
     return { date: d, normalized: formatCN(d) };
   }
 
-  // 过X天 / 过X日（无后缀）
+  // 过X天 / 过X日 / 过X周 / 过X个星期 / 过X个月 / 过X年
   const mOver = s.match(
-    new RegExp("^过([0-9一二三四五六七八九十两]+)(?:天|日)$")
+    new RegExp("^过([0-9一二三四五六七八九十两]+)(天|日|周|个星期|个月|年)$")
   );
   if (mOver) {
     const n = parseChineseNumber(mOver[1]);
-    if (n !== null && n > 0 && n <= 365) {
+    if (n === null || n <= 0) return null;
+
+    const unit = mOver[2];
+    if (unit === "天" || unit === "日") {
+      if (n > 365) return null;
       const d = addDays(base, n);
+      return { date: d, normalized: formatCN(d) };
+    }
+    if (unit === "周") {
+      if (n > 52) return null;
+      const d = addDays(base, n * 7);
+      return { date: d, normalized: formatCN(d) };
+    }
+    if (unit === "个星期") {
+      if (n > 52) return null;
+      const d = addDays(base, n * 7);
+      return { date: d, normalized: formatCN(d) };
+    }
+    if (unit === "个月") {
+      if (n > 24) return null;
+      const d = addMonths(base, n);
+      return { date: d, normalized: formatCN(d) };
+    }
+    if (unit === "年") {
+      if (n > 10) return null;
+      const d = addMonths(base, n * 12);
       return { date: d, normalized: formatCN(d) };
     }
     return null;
@@ -232,10 +272,10 @@ export function resolveRelativeDate(text, now = new Date()) {
     return null;
   }
 
-  // X个月内 / X个月后（自然月，不是 30 天）
+  // X个月内 / X个月后（“个”必须存在，避免“三月之后”被误解为“三个月后”）
   const mMonth = s.match(
     new RegExp(
-      "^([0-9一二三四五六七八九十两]+)(?:个)?月(?:之内|以内|内|之后|以后|后)$"
+      "^([0-9一二三四五六七八九十两]+)个月(?:之内|以内|内|之后|以后|后)$"
     )
   );
   if (mMonth) {
@@ -247,10 +287,10 @@ export function resolveRelativeDate(text, now = new Date()) {
     return null;
   }
 
-  // X年内 / X年后（12 个月）
+  // X年内 / X年后（“个”可选，年不和年份名混淆）
   const mYear = s.match(
     new RegExp(
-      "^([0-9一二三四五六七八九十两]+)(?:个)?年(?:之内|以内|内|之后|以后|后)$"
+      "^([0-9一二三四五六七八九十两]+)个?年(?:之内|以内|内|之后|以后|后)$"
     )
   );
   if (mYear) {
@@ -265,9 +305,6 @@ export function resolveRelativeDate(text, now = new Date()) {
   return null;
 }
 
-/**
- * 判断一个相对日期文本能否被本地换算（用当前时间）。
- */
 export function isResolvableRelativeDate(text) {
   return resolveRelativeDate(text, new Date()) !== null;
 }
