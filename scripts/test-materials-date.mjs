@@ -1,15 +1,15 @@
 /**
- * 材料清洗 + “下周X”日期计算 自检
+ * 材料清洗 自检
  * 用法：node scripts/test-materials-date.mjs
  *
- * 引用页面真实模块：
- *   ../app/lib/extractNotice.js
+ * 引用页面真实模块：../app/lib/extractNotice.js
  *
- * 验证：
- *   - 材料：括号说明被去掉、末尾标点被去掉、重复被去掉
- *   - “下周X”：按周一开始计算，星期日不会跳一周
- *   - 期望值由函数动态算出（用不同“今天”传入，结果不同）
- *   - 金丝雀：用不去括号的坏清洗函数，断言必须拒绝
+ * 覆盖：
+ *   - 括号说明被去掉（全角/半角），括号里的“原件”不被当作材料
+ *   - 末尾标点被去掉
+ *   - “身份证和身份证复印件”不被拆乱：期望“身份证,身份证复印件”
+ *   - 三样材料全部识别
+ *   - 金丝雀：用不去括号的坏实现，断言必须拒绝
  */
 
 import { extractNotice } from "../app/lib/extractNotice.js";
@@ -18,34 +18,10 @@ function eq(a, b) {
   return a === b;
 }
 
-function formatCN(date) {
-  return (
-    date.getFullYear() +
-    "年" +
-    (date.getMonth() + 1) +
-    "月" +
-    date.getDate() +
-    "日"
-  );
-}
-
-/**
- * 下周的某个星期几（一周从周一开始，周日是最后一天）。
- * target: 1=周一 ... 7=周日。
- * 这个函数就是"动态算期望值"的实现，不作为被测对象。
- */
-function nextWeekWeekday(today, target) {
-  const d = new Date(today);
-  const mondayBased = (d.getDay() + 6) % 7;
-  const daysToNextMonday = 7 - mondayBased;
-  d.setDate(d.getDate() + daysToNextMonday + (target - 1));
-  return d;
-}
-
 const CASES = [
-  // --- 材料：括号说明 ---
+  // --- 括号说明 ---
   {
-    name: "括号说明被去掉：身份证和选民证（说明）",
+    name: "括号说明被去掉（含逗号）：身份证和选民证",
     actual: () =>
       extractNotice(
         "请携带身份证和选民证（今天会发到大家手里，大家填好保存好）。"
@@ -53,7 +29,7 @@ const CASES = [
     expected: "身份证,选民证",
   },
   {
-    name: "括号说明里含逗号也不影响",
+    name: "括号说明里含逗号也不产生碎片",
     actual: () => {
       const m = extractNotice(
         "请携带身份证和选民证（今天会发到大家手里，大家填好保存好）。"
@@ -63,29 +39,43 @@ const CASES = [
     expected: false,
   },
   {
-    name: "全角括号里的说明被去掉",
+    name: "全角括号原件：身份证和学生证，不含“原件”",
     actual: () =>
       extractNotice("携带身份证（原件）和学生证。").materials.join(","),
     expected: "身份证,学生证",
   },
   {
-    name: "半角括号里的说明被去掉",
+    name: "全角括号原件的材料里没有“原件”",
+    actual: () =>
+      extractNotice("携带身份证（原件）和学生证。").materials.includes(
+        "原件"
+      ),
+    expected: false,
+  },
+  {
+    name: "半角括号原件：身份证和学生证，不含“原件”",
     actual: () =>
       extractNotice("携带身份证(原件)和学生证。").materials.join(","),
     expected: "身份证,学生证",
   },
-
-  // --- 材料：末尾标点 ---
   {
-    name: "末尾句号被去掉：一支黑色笔。",
+    name: "半角括号原件的材料里没有“原件”",
     actual: () =>
-      extractNotice("请携带一支黑色笔。").materials.join(","),
+      extractNotice("携带身份证(原件)和学生证。").materials.includes(
+        "原件"
+      ),
+    expected: false,
+  },
+
+  // --- 末尾标点 ---
+  {
+    name: "末尾句号被去掉：一支黑色笔。→ 黑色笔",
+    actual: () => extractNotice("请携带一支黑色笔。").materials.join(","),
     expected: "黑色笔",
   },
   {
     name: "末尾逗号被去掉",
-    actual: () =>
-      extractNotice("请携带身份证，").materials.join(","),
+    actual: () => extractNotice("请携带身份证，").materials.join(","),
     expected: "身份证",
   },
   {
@@ -97,72 +87,62 @@ const CASES = [
     expected: true,
   },
 
-  // --- 材料：去重 ---
+  // --- 相近材料不被拆乱 ---
   {
-    name: "同一材料不重复：身份证和身份证",
+    name: "身份证和身份证复印件：期望 身份证,身份证复印件",
     actual: () =>
       extractNotice("请携带身份证和身份证复印件。").materials.join(","),
-    expected: "身份证,身份证,复印件",
+    expected: "身份证,身份证复印件",
   },
   {
-    name: "三样材料全部识别",
+    name: "身份证和身份证复印件：不出现孤立的“复印件”",
+    actual: () =>
+      extractNotice("请携带身份证和身份证复印件。").materials.includes(
+        "复印件"
+      ),
+    expected: false,
+  },
+  {
+    name: "身份证和身份证复印件：身份证只出现一次",
+    actual: () => {
+      const m = extractNotice("请携带身份证和身份证复印件。").materials;
+      return m.filter((x) => x === "身份证").length;
+    },
+    expected: 1,
+  },
+  {
+    name: "只有身份证复印件时：结果就是身份证复印件",
+    actual: () =>
+      extractNotice("请携带身份证复印件。").materials.join(","),
+    expected: "身份证复印件",
+  },
+
+  // --- 三样材料全部识别 ---
+  {
+    name: "三样材料：身份证、学生证、照片",
     actual: () => {
       const m = extractNotice("请携带身份证、学生证、照片。").materials;
-      return m.length === 3 &&
+      return (
+        m.length === 3 &&
         m.includes("身份证") &&
         m.includes("学生证") &&
-        m.includes("照片");
+        m.includes("照片")
+      );
     },
     expected: true,
   },
-
-  // --- “下周X”按周一开始计算 ---
-  // 用固定的 4 个“今天”来验证：周日、周一、周三、周六。
-  // 期望值由 nextWeekWeekday 动态计算，不写死。
   {
-    name: "今天周日 11/01，下周三 → 3 天后（11/04）",
-    actual: () =>
-      formatCN(nextWeekWeekday(new Date(2026, 10, 1), 3)),
-    expected: "2026年11月4日",
-  },
-  {
-    name: "今天周一 11/02，下周三 → 9 天后（11/11）",
-    actual: () =>
-      formatCN(nextWeekWeekday(new Date(2026, 10, 2), 3)),
-    expected: "2026年11月11日",
-  },
-  {
-    name: "今天周三 11/04，下周三 → 7 天后（11/11）",
-    actual: () =>
-      formatCN(nextWeekWeekday(new Date(2026, 10, 4), 3)),
-    expected: "2026年11月11日",
-  },
-  {
-    name: "今天周六 11/07，下周三 → 4 天后（11/11）",
-    actual: () =>
-      formatCN(nextWeekWeekday(new Date(2026, 10, 7), 3)),
-    expected: "2026年11月11日",
-  },
-  {
-    name: "今天周日 11/01，下周一 → 1 天后（11/02）",
-    actual: () =>
-      formatCN(nextWeekWeekday(new Date(2026, 10, 1), 1)),
-    expected: "2026年11月2日",
-  },
-  {
-    name: "今天周日 11/01，下周日 → 7 天后（11/08）",
-    actual: () =>
-      formatCN(nextWeekWeekday(new Date(2026, 10, 1), 7)),
-    expected: "2026年11月8日",
-  },
-
-  // --- 期望值动态：同一函数传入不同日期结果不同 ---
-  {
-    name: "动态期望：换一个今天，期望值跟着变",
+    name: "带括号的三样：身份证、选民证、黑色笔",
     actual: () => {
-      const a = formatCN(nextWeekWeekday(new Date(2026, 10, 1), 3));
-      const b = formatCN(nextWeekWeekday(new Date(2026, 10, 2), 3));
-      return a !== b;
+      const m = extractNotice(
+        "请携带身份证、选民证（今天发到大家手里），还要带一支黑色笔。"
+      ).materials;
+      return (
+        m.includes("身份证") &&
+        m.includes("选民证") &&
+        m.includes("黑色笔") &&
+        !m.includes("原件")
+      );
     },
     expected: true,
   },
@@ -171,10 +151,10 @@ const CASES = [
 // ---------- 金丝雀 ----------
 
 /**
- * 坏的材料清洗：先 split 后清洗，不先去括号。
- * 对带括号的输入，会把括号里的逗号也切开，产生碎片。
+ * 坏实现：不去括号。
+ * 对“携带身份证（原件）和学生证”会命中“原件”。
  */
-function brokenExtractCarry(text) {
+function brokenExtractMaterials(text) {
   const CARRY_RE = new RegExp(
     "(?:携带|自备|需带|须带|请带|另带|带(?!领|来|队|头))[ ]*([^。；;\\n]{2,200})",
     "g"
@@ -193,19 +173,19 @@ function brokenExtractCarry(text) {
 }
 
 function runCanary() {
-  const text = "请携带身份证和选民证（今天会发到大家手里，大家填好保存好）。";
-  const expected = "身份证,选民证";
-  const brokenResult = brokenExtractCarry(text).join(",");
+  const text = "携带身份证（原件）和学生证。";
+  const expected = "身份证,学生证";
+  const brokenResult = brokenExtractMaterials(text).join(",");
   const realResult = extractNotice(text).materials.join(",");
 
-  console.log("[金丝雀] 用不去括号的坏清洗函数，断言必须拒绝");
+  console.log("[金丝雀] 用不去括号的坏实现，断言必须拒绝");
   console.log("    真实实现：" + JSON.stringify(realResult));
   console.log("    坏实现：" + JSON.stringify(brokenResult));
   console.log("    期望：" + JSON.stringify(expected));
 
   const wouldPass = eq(brokenResult, expected);
   if (wouldPass) {
-    console.log("    BROKEN - 坏实现被错误判为返回了干净的清单");
+    console.log("    BROKEN - 坏实现被错误判为返回了干净清单");
     console.log("    结论：异常 PASS - 断言逻辑已坏！");
     return false;
   }
