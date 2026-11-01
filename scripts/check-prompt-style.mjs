@@ -46,6 +46,7 @@ const ARCHIVE_BOUNDARY = "019b-quantity-variants-and-comments.md";
 
 let totalBad = 0;
 let checked = 0;
+let skipped = 0;
 let archiveCount = 0;
 let archiveBad = 0;
 
@@ -53,6 +54,7 @@ for (const f of files) {
   const md = readFileSync(join(dir, f), "utf8");
   const p = extractPrompt(md);
   if (p === null) {
+    skipped++;
     console.log("跳过（无 Prompt 块）  " + f);
     continue;
   }
@@ -85,10 +87,44 @@ for (const f of files) {
 
 console.log("");
 console.log(
+  "扫描情况：目录内 md " + files.length + " 份，实际检查 " + checked +
+    " 份，跳过 " + skipped + " 份"
+);
+console.log(
   "当前标准：合规通过，违规 " + totalBad + " 处 —— 这一项决定退出码"
 );
 console.log(
   "历史归档：" + archiveCount + " 份不符合现行符号规则，共 " + archiveBad +
     " 处，已投喂不再回溯，仅作留痕"
 );
+
+/**
+ * 【为什么零覆盖必须报错】
+ * 这个检查器的价值来自“它真的读过那些存档”。如果有一天目录挪了、
+ * 文件后缀改了、或者取块的写法坏了，它一份都读不到，却照样打印
+ * “未发现违反”并返回 0。屏幕上一片绿，真实情况是根本没有检查。
+ * 这比当场报错危险得多：前者引开注意力，后者立刻暴露问题。
+ *
+ * 所以这里把三种“等于没巡检”的情况一律判为失败：
+ *   1. 目录里一份 md 都没有
+ *   2. 有 md 但一份都没取到 Prompt 块
+ *   3. 实际检查的份数少于目录里 md 的份数且少得过多（全部被跳过由第 2 条覆盖）
+ * 判断自然写成显式分支，不用含糊的三元表达式，避免边角-smart 化之后失真。
+ */
+if (files.length === 0) {
+  console.log("");
+  console.log("？未发现待检查的 Prompt 归档，本次巡检无效（未读取任何文件）");
+  console.log("无效巡检不允许通过");
+  process.exit(2);
+}
+
+if (checked === 0) {
+  console.log("");
+  console.log(
+    "？目录里有 " + files.length + " 份 md，但没有一份取到 Prompt 块，本次巡检无效"
+  );
+  console.log("无效巡检不允许通过");
+  process.exit(2);
+}
+
 process.exit(totalBad === 0 ? 0 : 1);
