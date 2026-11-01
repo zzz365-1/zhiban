@@ -15,7 +15,16 @@
  *     X个月内/X个月后/过X个月、X年内/X年后/过X年
  *   - 跨月、跨年、闰年、月底
  *   - 含糊说法返回 null，不猜
- *   - 金丝雀：把“这个星期三”当成下周三的坏实现，断言必须拒绝
+ *   - 金丝雀：把“一个月后”当成“加 30 天”的坏实现，断言必须拒绝
+ *
+ * 【金丝雀为什么用“一个月后”而不是“这个星期三”】
+ * 之前用“这个星期三”，在周日这天出了个岔子：本周三已过时，
+ * 正确实现会把“这个星期三”顺延到下周（11-04），而“总是算下周三”
+ * 的坏实现算出来也是 11-04，两者恰好相同——金丝雀当场失灵。
+ * 换“一个月后”：加 1 自然月 vs 加 30 天，这个差别在任何一天
+ * 都存在（1月15日：正确 2-15，坏实现 2-14），不依赖星期几，稳定可靠。
+ * 教训：金丝雀本身要选“正确和错误必定不同”的例子，
+ * 否则日历巧合会让它误报“断言正常”。
  */
 
 import { resolveRelativeDate } from "../app/lib/relativeDate.js";
@@ -34,10 +43,10 @@ function resolveOrNull(text, now) {
   return r ? r.normalized : null;
 }
 
-const NOW_SUNDAY = d(2026, 11, 1);      // 2026-11-01 周日
-const NOW_MONDAY = d(2026, 11, 2);      // 2026-11-02 周一
-const NOW_WEDNESDAY = d(2026, 11, 4);   // 2026-11-04 周三
-const NOW_SATURDAY = d(2026, 11, 7);    // 2026-11-07 周六
+const NOW_SUNDAY = d(2026, 11, 1);
+const NOW_MONDAY = d(2026, 11, 2);
+const NOW_WEDNESDAY = d(2026, 11, 4);
+const NOW_SATURDAY = d(2026, 11, 7);
 const NOW_JAN15 = d(2026, 1, 15);
 const NOW_JAN31 = d(2026, 1, 31);
 const NOW_MAR31 = d(2026, 3, 31);
@@ -72,7 +81,7 @@ const CASES = [
   { name: "今天周一，本周三 = 11月4日", actual: () => resolveOrNull("本周三", NOW_MONDAY), expected: "2026年11月4日" },
   { name: "今天周三，本周三 = 今天", actual: () => resolveOrNull("本周三", NOW_WEDNESDAY), expected: "2026年11月4日" },
 
-  // --- 这个周三 / 这个星期三 / 这一个星期三 ---
+  // --- 这个星期三 / 这个周三 / 这一个星期三 ---
   { name: "今天周日，这个星期三 = 11月4日", actual: () => resolveOrNull("这个星期三", NOW_SUNDAY), expected: "2026年11月4日" },
   { name: "今天周日，这个周三 = 11月4日", actual: () => resolveOrNull("这个周三", NOW_SUNDAY), expected: "2026年11月4日" },
   { name: "今天周日，这个星期日 = 今天", actual: () => resolveOrNull("这个星期日", NOW_SUNDAY), expected: "2026年11月1日" },
@@ -259,27 +268,35 @@ const CASES = [
 // ---------- 金丝雀 ----------
 
 /**
- * 坏实现：把“这个星期三”当成“下周三”（多算一周）。
- * 今天周日 2026-11-01，“这个星期三”正确 = 11月4日；
- * 错误实现会得到 11月11日。
- * 如果断言把这个错值当成正确，说明断言坏了。
+ * 【金丝雀的意义】
+ * 故意用一个“错的做法”喂进比较逻辑，期望被拒。如果连这个都能通过，
+ * 说明断言本身失效——业务用例的 PASS 就全都不可信。
+ *
+ * 【为什么不用“这个星期三”做金丝雀】
+ * 之前用“这个星期三”出过事故：周日当天，本周三已过，
+ * 正确实现会顺延到下周（11-04），而“总是算下周三”的坏实现
+ * 从周日推 3 天也算出 11-04，两个结果撞在一起，金丝雀当场失灵。
+ * 这类“日历巧合”让金丝雀本身变成了可错的，不能再用。
+ *
+ * 【这次用“一个月后”】
+ * 正确：加 1 自然月。在 2026-01-15 = 2 月 15 日。
+ * 坏实现：加 30 天 = 2 月 14 日（1 月有 31 天，15 + 30 = 45，45 - 31 = 14）。
+ * 差 1 天，不依赖星期几，无论哪一天跑都稳定抓住。
  */
-function brokenResolveThisWednesday(now) {
-  const mondayBased = (now.getDay() + 6) % 7;
-  const targetMondayBased = (3 + 6) % 7;
-  const offset = 7 - mondayBased + targetMondayBased;
-  const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + offset);
+function brokenAddOneMonthAs30Days(now) {
+  const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 30);
   return (
     d.getFullYear() + "年" + (d.getMonth() + 1) + "月" + d.getDate() + "日"
   );
 }
 
 function runCanary() {
-  const correct = resolveOrNull("这个星期三", NOW_SUNDAY);
-  const expected = "2026年11月4日";
-  const broken = brokenResolveThisWednesday(NOW_SUNDAY);
+  const now = NOW_JAN15; // 2026-01-15，周四
+  const correct = resolveOrNull("一个月后", now);
+  const expected = "2026年2月15日";
+  const broken = brokenAddOneMonthAs30Days(now);
 
-  console.log("[金丝雀] 用「这个星期三 = 下周三」的坏实现，断言必须拒绝");
+  console.log("[金丝雀] 用「一个月后 = 加 30 天」的坏实现，断言必须拒绝");
   console.log("    正确实现：" + JSON.stringify(correct));
   console.log("    坏实现：" + JSON.stringify(broken));
   console.log("    期望：" + JSON.stringify(expected));
