@@ -17,8 +17,13 @@
  *
  * 支持的说法：
  *   - 今天 / 明天 / 后天 / 大后天 / 次日 / 隔天 / 即日
- *   - 下周一 ~ 下周日、下一周X、下个星期X、这个星期X（含“下周天”）
- *   - 本周X / 这周X / 本星期X / 这星期X（已过则顺延到下周）
+ *   - 周几（含省略前缀、本周、下周、下下周）：
+ *     · 周三 / 星期三            → 本周；已过则顺延
+ *     · 本周三 / 这周三 / 本星期三 / 这星期三
+ *     · 这个周三 / 这个星期三 / 这一个周三 / 这一个星期三
+ *     · 下周三 / 下周X / 下个周三 / 下个星期三
+ *     · 下一个周三 / 下一个星期三 / 下一周周三
+ *     · 下下周三 / 下下周X / 下下个周三 / 下下个星期三
  *   - 本月底 / 本月末 / 本月初 / 下月底 / 下月末 / 下月初
  *   - 本月X日 / 下月X日 / 本月X号 / 下月X号
  *   - X天内 / X天后 / X日内 / X日后 / 过X天
@@ -37,6 +42,16 @@ const CN_DIGITS = {
   一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5,
   六: 6, 七: 7, 八: 8, 九: 9,
 };
+
+/**
+ * 周几前缀正则。长前缀放前面，避免“下”抢在“下下”“下个”之前匹配。
+ * 前缀分类（用于决定加几周）：
+ *   - 以“下下”开头 → +2 周
+ *   - 以“下”开头（下/下个/下一个/下一周/下个星期） → +1 周
+ *   - 本/这/这个/这一个/本周/本星期/这个星期/这一个星期/省略 → 本周（已过则顺延）
+ */
+const WEEK_PREFIX_RE =
+  "(?:下下个星期|下下个|下下|下一个|下个星期|这个星期|这一个星期|下一个|本星期|下一周|下个|这个|这一个|本周|下|本|这)?";
 
 function parseChineseNumber(s) {
   if (!s) return null;
@@ -122,29 +137,32 @@ export function resolveRelativeDate(text, now = new Date()) {
     return { date: d, normalized: formatCN(d) };
   }
 
-  // 下周X / 下一周X / 下个星期X / 这个星期X / 本周X / 这周X
+  // 周几：支持省略前缀、本周/这个/这、下周/下个/下一个/下一周、下下周
   const m1 = s.match(
-    new RegExp(
-      "^(下一周|下个星期|这个星期|这个周|下|本|这)?(?:周|星期)([一二三四五六日天])$"
-    )
+    new RegExp("^(" + WEEK_PREFIX_RE + ")[ ]*(?:周|星期)[ ]*([一二三四五六日天])$")
   );
   if (m1) {
-    const rawPrefix = m1[1] || "本";
+    const rawPrefix = m1[1] || "";
     const target = DAY_MAP[m1[2]];
     const mondayBased = (base.getDay() + 6) % 7;
     const targetMondayBased = (target + 6) % 7;
 
-    const isNext =
-      rawPrefix === "下" ||
-      rawPrefix === "下一周" ||
-      rawPrefix === "下个星期";
+    let weeksAhead;
+    if (rawPrefix.startsWith("下下")) {
+      weeksAhead = 2;
+    } else if (rawPrefix.startsWith("下")) {
+      weeksAhead = 1;
+    } else {
+      weeksAhead = 0;
+    }
 
     let offset;
-    if (isNext) {
-      offset = 7 - mondayBased + targetMondayBased;
-    } else {
+    if (weeksAhead === 0) {
+      // 本周：目标日已过则顺延到下周
       offset = -mondayBased + targetMondayBased;
       if (offset < 0) offset += 7;
+    } else {
+      offset = weeksAhead * 7 - mondayBased + targetMondayBased;
     }
 
     const d = addDays(base, offset);
@@ -216,33 +234,24 @@ export function resolveRelativeDate(text, now = new Date()) {
     const unit = mOver[2];
     if (unit === "天" || unit === "日") {
       if (n > 365) return null;
-      const d = addDays(base, n);
-      return { date: d, normalized: formatCN(d) };
+      return { date: addDays(base, n), normalized: formatCN(addDays(base, n)) };
     }
-    if (unit === "周") {
+    if (unit === "周" || unit === "个星期") {
       if (n > 52) return null;
-      const d = addDays(base, n * 7);
-      return { date: d, normalized: formatCN(d) };
-    }
-    if (unit === "个星期") {
-      if (n > 52) return null;
-      const d = addDays(base, n * 7);
-      return { date: d, normalized: formatCN(d) };
+      return { date: addDays(base, n * 7), normalized: formatCN(addDays(base, n * 7)) };
     }
     if (unit === "个月") {
       if (n > 24) return null;
-      const d = addMonths(base, n);
-      return { date: d, normalized: formatCN(d) };
+      return { date: addMonths(base, n), normalized: formatCN(addMonths(base, n)) };
     }
     if (unit === "年") {
       if (n > 10) return null;
-      const d = addMonths(base, n * 12);
-      return { date: d, normalized: formatCN(d) };
+      return { date: addMonths(base, n * 12), normalized: formatCN(addMonths(base, n * 12)) };
     }
     return null;
   }
 
-  // X天内 / X天后 / X日内 / X日后（必须有后缀）
+  // X天内 / X天后 / X日内 / X日后
   const m3 = s.match(
     new RegExp(
       "^([0-9一二三四五六七八九十两]+)(?:天|日)(?:之内|以内|内|之后|以后|后)$"
@@ -272,7 +281,7 @@ export function resolveRelativeDate(text, now = new Date()) {
     return null;
   }
 
-  // X个月内 / X个月后（“个”必须存在，避免“三月之后”被误解为“三个月后”）
+  // X个月内 / X个月后（“个”必须存在）
   const mMonth = s.match(
     new RegExp(
       "^([0-9一二三四五六七八九十两]+)个月(?:之内|以内|内|之后|以后|后)$"
@@ -287,7 +296,7 @@ export function resolveRelativeDate(text, now = new Date()) {
     return null;
   }
 
-  // X年内 / X年后（“个”可选，年不和年份名混淆）
+  // X年内 / X年后（“个”可选）
   const mYear = s.match(
     new RegExp(
       "^([0-9一二三四五六七八九十两]+)个?年(?:之内|以内|内|之后|以后|后)$"

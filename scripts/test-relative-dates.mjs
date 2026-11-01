@@ -8,17 +8,14 @@
  *
  * 覆盖：
  *   - 今天/明天/后天/大后天/次日/隔天/即日
- *   - 下周一 ~ 下周日、下一周X、下个星期X、这个星期X
- *   - 本周X / 这周X（已过则顺延）
- *   - 本月底/本月初/下月底/下月初
- *   - 本月X日 / 下月X日
- *   - X天内 / X天后 / 过X天
- *   - X周内 / X周后 / X个星期内 / X个星期后 / 过X周 / 过X个星期
- *   - X个月内 / X个月后 / 过X个月
- *   - X年内 / X年后 / 过X年
- *   - “三月之后”“一月后”等含糊说法返回 null，不猜
+ *   - 周几：裸“周X”、本周X、这周X、这个周X、这个星期X、这一个星期X、
+ *     下X、下个X、下一个X、下一周X、下下周X、下下个X
+ *   - 本月底/本月初/下月底/下月初、本月X日、下月X日
+ *   - X天内/X天后/过X天、X周内/X周后/过X周、
+ *     X个月内/X个月后/过X个月、X年内/X年后/过X年
  *   - 跨月、跨年、闰年、月底
- *   - 金丝雀：把“三月之后”当成“三个月后”的坏实现，断言必须拒绝
+ *   - 含糊说法返回 null，不猜
+ *   - 金丝雀：把“这个星期三”当成下周三的坏实现，断言必须拒绝
  */
 
 import { resolveRelativeDate } from "../app/lib/relativeDate.js";
@@ -41,14 +38,12 @@ const NOW_SUNDAY = d(2026, 11, 1);      // 2026-11-01 周日
 const NOW_MONDAY = d(2026, 11, 2);      // 2026-11-02 周一
 const NOW_WEDNESDAY = d(2026, 11, 4);   // 2026-11-04 周三
 const NOW_SATURDAY = d(2026, 11, 7);    // 2026-11-07 周六
-const NOW_JAN15 = d(2026, 1, 15);       // 2026-01-15 周四
-const NOW_JAN31 = d(2026, 1, 31);       // 2026-01-31 周六
-const NOW_MAR31 = d(2026, 3, 31);       // 2026-03-31 周二
-const NOW_DEC31 = d(2025, 12, 31);      // 2025-12-31 周三
-// 修正：这条用例名和期望都是 2025-11-15 + 3 个月 = 2026-02-15，
-// 基准日期必须是 2025-11-15（之前误写成 2026-11-15，导致期望对不上）。
-const NOW_NOV15_2025 = d(2025, 11, 15); // 2025-11-15 周六
-const NOW_FEB01 = d(2024, 2, 1);        // 2024-02-01 周四（闰年）
+const NOW_JAN15 = d(2026, 1, 15);
+const NOW_JAN31 = d(2026, 1, 31);
+const NOW_MAR31 = d(2026, 3, 31);
+const NOW_DEC31 = d(2025, 12, 31);
+const NOW_NOV15_2025 = d(2025, 11, 15);
+const NOW_FEB01 = d(2024, 2, 1);
 const NOW_FEB27_LEAP = d(2024, 2, 27);
 const NOW_FEB27_COMMON = d(2026, 2, 27);
 const NOW_FEB28 = d(2026, 2, 28);
@@ -63,18 +58,12 @@ const CASES = [
   { name: "隔天（2026-11-01）= 11月2日", actual: () => resolveOrNull("隔天", NOW_SUNDAY), expected: "2026年11月2日" },
   { name: "即日（2026-11-01）= 11月1日", actual: () => resolveOrNull("即日", NOW_SUNDAY), expected: "2026年11月1日" },
 
-  // --- 周几 ---
-  { name: "今天周日，下周三 = 11月4日", actual: () => resolveOrNull("下周三", NOW_SUNDAY), expected: "2026年11月4日" },
-  { name: "今天周日，下周一 = 11月2日", actual: () => resolveOrNull("下周一", NOW_SUNDAY), expected: "2026年11月2日" },
-  { name: "今天周日，下周日 = 11月8日", actual: () => resolveOrNull("下周日", NOW_SUNDAY), expected: "2026年11月8日" },
-  { name: "今天周日，下周天 = 11月8日", actual: () => resolveOrNull("下周天", NOW_SUNDAY), expected: "2026年11月8日" },
-  { name: "今天周一，下周三 = 11月11日", actual: () => resolveOrNull("下周三", NOW_MONDAY), expected: "2026年11月11日" },
-  { name: "今天周三，下周三 = 11月11日", actual: () => resolveOrNull("下周三", NOW_WEDNESDAY), expected: "2026年11月11日" },
-  { name: "今天周六，下周三 = 11月11日", actual: () => resolveOrNull("下周三", NOW_SATURDAY), expected: "2026年11月11日" },
-  { name: "今天周日，下一周周三 = 11月4日", actual: () => resolveOrNull("下一周周三", NOW_SUNDAY), expected: "2026年11月4日" },
-  { name: "今天周日，下个星期周三 = 11月4日", actual: () => resolveOrNull("下个星期周三", NOW_SUNDAY), expected: "2026年11月4日" },
-  { name: "今天周日，这个星期三已过 → 11月4日", actual: () => resolveOrNull("这个星期三", NOW_SUNDAY), expected: "2026年11月4日" },
-  { name: "今天周一，这个星期三 = 11月4日", actual: () => resolveOrNull("这个星期三", NOW_MONDAY), expected: "2026年11月4日" },
+  // --- 周几：裸周X ---
+  { name: "今天周日，周三 = 11月4日（本周已过顺延）", actual: () => resolveOrNull("周三", NOW_SUNDAY), expected: "2026年11月4日" },
+  { name: "今天周日，星期三 = 11月4日", actual: () => resolveOrNull("星期三", NOW_SUNDAY), expected: "2026年11月4日" },
+  { name: "今天周日，周日 = 今天 11月1日", actual: () => resolveOrNull("周日", NOW_SUNDAY), expected: "2026年11月1日" },
+  { name: "今天周一，周三 = 11月4日", actual: () => resolveOrNull("周三", NOW_MONDAY), expected: "2026年11月4日" },
+  { name: "今天周三，周三 = 今天", actual: () => resolveOrNull("周三", NOW_WEDNESDAY), expected: "2026年11月4日" },
 
   // --- 本周X / 这周X ---
   { name: "今天周日，本周日 = 今天", actual: () => resolveOrNull("本周日", NOW_SUNDAY), expected: "2026年11月1日" },
@@ -82,6 +71,38 @@ const CASES = [
   { name: "今天周日，本周三已过 → 11月4日", actual: () => resolveOrNull("本周三", NOW_SUNDAY), expected: "2026年11月4日" },
   { name: "今天周一，本周三 = 11月4日", actual: () => resolveOrNull("本周三", NOW_MONDAY), expected: "2026年11月4日" },
   { name: "今天周三，本周三 = 今天", actual: () => resolveOrNull("本周三", NOW_WEDNESDAY), expected: "2026年11月4日" },
+
+  // --- 这个周三 / 这个星期三 / 这一个星期三 ---
+  { name: "今天周日，这个星期三 = 11月4日", actual: () => resolveOrNull("这个星期三", NOW_SUNDAY), expected: "2026年11月4日" },
+  { name: "今天周日，这个周三 = 11月4日", actual: () => resolveOrNull("这个周三", NOW_SUNDAY), expected: "2026年11月4日" },
+  { name: "今天周日，这个星期日 = 今天", actual: () => resolveOrNull("这个星期日", NOW_SUNDAY), expected: "2026年11月1日" },
+  { name: "今天周日，这个周日 = 今天", actual: () => resolveOrNull("这个周日", NOW_SUNDAY), expected: "2026年11月1日" },
+  { name: "今天周日，这一个星期三 = 11月4日", actual: () => resolveOrNull("这一个星期三", NOW_SUNDAY), expected: "2026年11月4日" },
+  { name: "今天周一，这个星期三 = 11月4日", actual: () => resolveOrNull("这个星期三", NOW_MONDAY), expected: "2026年11月4日" },
+
+  // --- 下个星期三 / 下一个星期三 ---
+  { name: "今天周日，下个星期三 = 11月4日", actual: () => resolveOrNull("下个星期三", NOW_SUNDAY), expected: "2026年11月4日" },
+  { name: "今天周日，下一个星期三 = 11月4日", actual: () => resolveOrNull("下一个星期三", NOW_SUNDAY), expected: "2026年11月4日" },
+  { name: "今天周日，下个周三 = 11月4日", actual: () => resolveOrNull("下个周三", NOW_SUNDAY), expected: "2026年11月4日" },
+  { name: "今天周日，下一个周日 = 11月8日", actual: () => resolveOrNull("下一个周日", NOW_SUNDAY), expected: "2026年11月8日" },
+  { name: "今天周一，下个星期三 = 11月11日", actual: () => resolveOrNull("下个星期三", NOW_MONDAY), expected: "2026年11月11日" },
+  { name: "今天周三，下个星期三 = 11月11日", actual: () => resolveOrNull("下个星期三", NOW_WEDNESDAY), expected: "2026年11月11日" },
+
+  // --- 下周X / 下一周X ---
+  { name: "今天周日，下周三 = 11月4日", actual: () => resolveOrNull("下周三", NOW_SUNDAY), expected: "2026年11月4日" },
+  { name: "今天周日，下周一 = 11月2日", actual: () => resolveOrNull("下周一", NOW_SUNDAY), expected: "2026年11月2日" },
+  { name: "今天周日，下周日 = 11月8日", actual: () => resolveOrNull("下周日", NOW_SUNDAY), expected: "2026年11月8日" },
+  { name: "今天周日，下周天 = 11月8日", actual: () => resolveOrNull("下周天", NOW_SUNDAY), expected: "2026年11月8日" },
+  { name: "今天周日，下一周周三 = 11月4日", actual: () => resolveOrNull("下一周周三", NOW_SUNDAY), expected: "2026年11月4日" },
+  { name: "今天周一，下周三 = 11月11日", actual: () => resolveOrNull("下周三", NOW_MONDAY), expected: "2026年11月11日" },
+  { name: "今天周三，下周三 = 11月11日", actual: () => resolveOrNull("下周三", NOW_WEDNESDAY), expected: "2026年11月11日" },
+  { name: "今天周六，下周三 = 11月11日", actual: () => resolveOrNull("下周三", NOW_SATURDAY), expected: "2026年11月11日" },
+
+  // --- 下下周X / 下下个X ---
+  { name: "今天周日，下下周三 = 11月11日", actual: () => resolveOrNull("下下周三", NOW_SUNDAY), expected: "2026年11月11日" },
+  { name: "今天周日，下下个星期三 = 11月11日", actual: () => resolveOrNull("下下个星期三", NOW_SUNDAY), expected: "2026年11月11日" },
+  { name: "今天周一，下下周三 = 11月18日", actual: () => resolveOrNull("下下周三", NOW_MONDAY), expected: "2026年11月18日" },
+  { name: "今天周日，下下周一 = 11月9日", actual: () => resolveOrNull("下下周一", NOW_SUNDAY), expected: "2026年11月9日" },
 
   // --- 月底/月初 ---
   { name: "本月底（2026-11-01）= 11月30日", actual: () => resolveOrNull("本月底", NOW_SUNDAY), expected: "2026年11月30日" },
@@ -137,7 +158,7 @@ const CASES = [
   { name: "一个星期后（2026-11-01）= 11月8日", actual: () => resolveOrNull("一个星期后", NOW_SUNDAY), expected: "2026年11月8日" },
   { name: "两个星期内（2026-11-01）= 11月15日", actual: () => resolveOrNull("两个星期内", NOW_SUNDAY), expected: "2026年11月15日" },
 
-  // --- X个月内 / X个月后（“个”必须） ---
+  // --- X个月内 / X个月后 ---
   { name: "一个月内（2026-11-01）= 12月1日", actual: () => resolveOrNull("一个月内", NOW_SUNDAY), expected: "2026年12月1日" },
   { name: "一个月后（2026-11-01）= 12月1日", actual: () => resolveOrNull("一个月后", NOW_SUNDAY), expected: "2026年12月1日" },
   { name: "三个月后（2026-11-01）= 2027年2月1日", actual: () => resolveOrNull("三个月后", NOW_SUNDAY), expected: "2027年2月1日" },
@@ -146,11 +167,11 @@ const CASES = [
   { name: "过一个月（2026-11-01）= 12月1日", actual: () => resolveOrNull("过一个月", NOW_SUNDAY), expected: "2026年12月1日" },
   { name: "过三个月（2026-11-01）= 2027年2月1日", actual: () => resolveOrNull("过三个月", NOW_SUNDAY), expected: "2027年2月1日" },
 
-  // --- 月份加减的月末处理 ---
+  // --- 月份月末处理 ---
   { name: "月末：2026-01-31 一个月后 = 2月28日（平年）", actual: () => resolveOrNull("一个月后", NOW_JAN31), expected: "2026年2月28日" },
   { name: "月末闰年：2024-01-31 一个月后 = 2月29日（闰年）", actual: () => resolveOrNull("一个月后", d(2024, 1, 31)), expected: "2024年2月29日" },
-  { name: "月末：2026-03-31 一个月后 = 4月30日（4月只有30天）", actual: () => resolveOrNull("一个月后", NOW_MAR31), expected: "2026年4月30日" },
-  { name: "月末：2026-01-15 一个月后 = 2月15日（正常日）", actual: () => resolveOrNull("一个月后", NOW_JAN15), expected: "2026年2月15日" },
+  { name: "月末：2026-03-31 一个月后 = 4月30日", actual: () => resolveOrNull("一个月后", NOW_MAR31), expected: "2026年4月30日" },
+  { name: "月末：2026-01-15 一个月后 = 2月15日", actual: () => resolveOrNull("一个月后", NOW_JAN15), expected: "2026年2月15日" },
 
   // --- X年内 / X年后 / 过X年 ---
   { name: "一年后（2026-11-01）= 2027年11月1日", actual: () => resolveOrNull("一年后", NOW_SUNDAY), expected: "2027年11月1日" },
@@ -165,6 +186,7 @@ const CASES = [
   { name: "跨月：2026-01-31 三天内 = 2月3日", actual: () => resolveOrNull("三天内", NOW_JAN31), expected: "2026年2月3日" },
   { name: "跨月：2026-01-31 过三天 = 2月3日", actual: () => resolveOrNull("过三天", NOW_JAN31), expected: "2026年2月3日" },
   { name: "跨月：2026-01-31 下周三 = 2月4日", actual: () => resolveOrNull("下周三", NOW_JAN31), expected: "2026年2月4日" },
+  { name: "跨月：2026-01-31 这个星期三已过 → 2月4日", actual: () => resolveOrNull("这个星期三", NOW_JAN31), expected: "2026年2月4日" },
   { name: "跨月：2026-01-31 一周后 = 2月7日", actual: () => resolveOrNull("一周后", NOW_JAN31), expected: "2026年2月7日" },
   { name: "跨月：2026-01-31 过一周 = 2月7日", actual: () => resolveOrNull("过一周", NOW_JAN31), expected: "2026年2月7日" },
 
@@ -176,24 +198,22 @@ const CASES = [
   { name: "跨年：2025-12-31 过一周 = 2026年1月7日", actual: () => resolveOrNull("过一周", NOW_DEC31), expected: "2026年1月7日" },
   { name: "跨年：2025-12-31 一个月后 = 2026年1月31日", actual: () => resolveOrNull("一个月后", NOW_DEC31), expected: "2026年1月31日" },
   { name: "跨年：2025-12-31 三个月后 = 2026年3月31日", actual: () => resolveOrNull("三个月后", NOW_DEC31), expected: "2026年3月31日" },
-
-  // 修正的那条：基准是 2025-11-15，不是 2026-11-15
   { name: "跨年：2025-11-15 三个月后 = 2026年2月15日", actual: () => resolveOrNull("三个月后", NOW_NOV15_2025), expected: "2026年2月15日" },
 
   // --- 闰年 vs 平年月底 ---
-  { name: "闰年：2024-02-27 三天内 = 3月1日（2月有29天）", actual: () => resolveOrNull("三天内", NOW_FEB27_LEAP), expected: "2024年3月1日" },
-  { name: "平年：2026-02-27 三天内 = 3月2日（2月有28天）", actual: () => resolveOrNull("三天内", NOW_FEB27_COMMON), expected: "2026年3月2日" },
+  { name: "闰年：2024-02-27 三天内 = 3月1日", actual: () => resolveOrNull("三天内", NOW_FEB27_LEAP), expected: "2024年3月1日" },
+  { name: "平年：2026-02-27 三天内 = 3月2日", actual: () => resolveOrNull("三天内", NOW_FEB27_COMMON), expected: "2026年3月2日" },
   { name: "平年：2026-02-28 明天 = 3月1日", actual: () => resolveOrNull("明天", NOW_FEB28), expected: "2026年3月1日" },
 
-  // --- 含糊说法返回 null，不猜 ---
-  { name: "「三月之后」= null（语义含糊，交给 AI）", actual: () => resolveOrNull("三月之后", NOW_SUNDAY), expected: null },
-  { name: "「一月后」= null（“一月”也是月份名）", actual: () => resolveOrNull("一月后", NOW_SUNDAY), expected: null },
-  { name: "「十二月内」= null（同上）", actual: () => resolveOrNull("十二月内", NOW_SUNDAY), expected: null },
+  // --- 含糊说法返回 null ---
+  { name: "「三月之后」= null", actual: () => resolveOrNull("三月之后", NOW_SUNDAY), expected: null },
+  { name: "「一月后」= null", actual: () => resolveOrNull("一月后", NOW_SUNDAY), expected: null },
+  { name: "「十二月内」= null", actual: () => resolveOrNull("十二月内", NOW_SUNDAY), expected: null },
   { name: "「半个月后」= null", actual: () => resolveOrNull("半个月后", NOW_SUNDAY), expected: null },
   { name: "「几天后」= null", actual: () => resolveOrNull("几天后", NOW_SUNDAY), expected: null },
   { name: "「数天内」= null", actual: () => resolveOrNull("数天内", NOW_SUNDAY), expected: null },
-  { name: "「一百天后」= null（超范围）", actual: () => resolveOrNull("一百天后", NOW_SUNDAY), expected: null },
-  { name: "「一百个月内」= null（超范围）", actual: () => resolveOrNull("一百个月内", NOW_SUNDAY), expected: null },
+  { name: "「一百天后」= null", actual: () => resolveOrNull("一百天后", NOW_SUNDAY), expected: null },
+  { name: "「一百个月内」= null", actual: () => resolveOrNull("一百个月内", NOW_SUNDAY), expected: null },
   { name: "「下周」单独 = null", actual: () => resolveOrNull("下周", NOW_SUNDAY), expected: null },
   { name: "「月底」没说哪个月 = null", actual: () => resolveOrNull("月底", NOW_SUNDAY), expected: null },
   { name: "「近期」= null", actual: () => resolveOrNull("近期", NOW_SUNDAY), expected: null },
@@ -204,6 +224,21 @@ const CASES = [
   { name: "空字符串 = null", actual: () => resolveOrNull("", NOW_SUNDAY), expected: null },
 
   // --- extractNotice + resolveRelativeDate 组合 ---
+  { name: "组合：原文「这个星期三前交」本地抽出「这个星期三」并换算", actual: () => {
+      const rule = extractNotice("请于这个星期三前将材料交至A101。");
+      const r = resolveRelativeDate(rule.deadline, NOW_SUNDAY);
+      return r ? r.normalized : null;
+    }, expected: "2026年11月4日" },
+  { name: "组合：原文「下个星期三前交」本地抽出「下个星期三」并换算", actual: () => {
+      const rule = extractNotice("请于下个星期三前将材料交至A101。");
+      const r = resolveRelativeDate(rule.deadline, NOW_SUNDAY);
+      return r ? r.normalized : null;
+    }, expected: "2026年11月4日" },
+  { name: "组合：原文「下下周三交」本地抽出「下下周三」并换算", actual: () => {
+      const rule = extractNotice("请于下下周三前将材料交至A101。");
+      const r = resolveRelativeDate(rule.deadline, NOW_SUNDAY);
+      return r ? r.normalized : null;
+    }, expected: "2026年11月11日" },
   { name: "组合：原文「过三天交」本地抽出「过三天」并换算", actual: () => {
       const rule = extractNotice("请过三天把表交到教务处A101。");
       const r = resolveRelativeDate(rule.deadline, NOW_SUNDAY);
@@ -214,57 +249,44 @@ const CASES = [
       const r = resolveRelativeDate(rule.deadline, NOW_SUNDAY);
       return r ? r.normalized : null;
     }, expected: "2026年11月8日" },
-  { name: "组合：原文「过两周报送」本地抽出「过两周」并换算", actual: () => {
-      const rule = extractNotice("材料请过两周报送至教务处A101。");
-      const r = resolveRelativeDate(rule.deadline, NOW_SUNDAY);
-      return r ? r.normalized : null;
-    }, expected: "2026年11月15日" },
-  { name: "组合：原文「过一个月提交」本地抽出「过一个月」并换算", actual: () => {
-      const rule = extractNotice("请过一个月提交材料至教务处A101。");
+  { name: "组合：原文「一个月内提交」本地抽出「一个月内」并换算", actual: () => {
+      const rule = extractNotice("请于一个月内提交材料至教务处A101。");
       const r = resolveRelativeDate(rule.deadline, NOW_SUNDAY);
       return r ? r.normalized : null;
     }, expected: "2026年12月1日" },
-  { name: "组合：原文「次日交」本地抽出「次日」并换算", actual: () => {
-      const rule = extractNotice("请次日把表交到教务处A101。");
-      const r = resolveRelativeDate(rule.deadline, NOW_SUNDAY);
-      return r ? r.normalized : null;
-    }, expected: "2026年11月2日" },
-  { name: "组合：原文「三月之后再来」本地不认「三月之后」", actual: () => {
-      const rule = extractNotice("请三月之后再来教务处A101办理。");
-      // “三月之后”在 extractNotice 里不应被识别为月份长度
-      const r = rule.deadline ? resolveRelativeDate(rule.deadline, NOW_SUNDAY) : null;
-      return r ? r.normalized : null;
-    }, expected: null },
 ];
 
 // ---------- 金丝雀 ----------
 
 /**
- * 坏实现：把“三月之后”当成“三个月后”。
- * 对 2026-11-01 的“三月之后”，坏实现给出 2027-02-01，
- * 正确应为 null（语义含糊，交给 AI 判断）。
- * 如果断言把这个错值当成 null 通过，说明断言坏了。
+ * 坏实现：把“这个星期三”当成“下周三”（多算一周）。
+ * 今天周日 2026-11-01，“这个星期三”正确 = 11月4日；
+ * 错误实现会得到 11月11日。
+ * 如果断言把这个错值当成正确，说明断言坏了。
  */
-function brokenResolveMarchAfter(now) {
-  const d = new Date(now.getFullYear(), now.getMonth() + 3, now.getDate());
+function brokenResolveThisWednesday(now) {
+  const mondayBased = (now.getDay() + 6) % 7;
+  const targetMondayBased = (3 + 6) % 7;
+  const offset = 7 - mondayBased + targetMondayBased;
+  const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + offset);
   return (
     d.getFullYear() + "年" + (d.getMonth() + 1) + "月" + d.getDate() + "日"
   );
 }
 
 function runCanary() {
-  const correct = resolveOrNull("三月之后", NOW_SUNDAY);
-  const expected = null;
-  const broken = brokenResolveMarchAfter(NOW_SUNDAY);
+  const correct = resolveOrNull("这个星期三", NOW_SUNDAY);
+  const expected = "2026年11月4日";
+  const broken = brokenResolveThisWednesday(NOW_SUNDAY);
 
-  console.log("[金丝雀] 用「三月之后 = 三个月后」的坏实现，断言必须拒绝");
+  console.log("[金丝雀] 用「这个星期三 = 下周三」的坏实现，断言必须拒绝");
   console.log("    正确实现：" + JSON.stringify(correct));
   console.log("    坏实现：" + JSON.stringify(broken));
   console.log("    期望：" + JSON.stringify(expected));
 
   const wouldPass = eq(broken, expected);
   if (wouldPass) {
-    console.log("    BROKEN - 坏实现被错误判为与期望（null）相等");
+    console.log("    BROKEN - 坏实现被错误判为与期望相等");
     console.log("    结论：异常 PASS - 断言逻辑已坏！");
     return false;
   }
