@@ -50,11 +50,12 @@ export function isRuleResultGood(ruleResult) {
 /**
  * 合并 AI 结果。
  *
- * - deadline 与 time 绑定为同一来源。
- * - 本地是模糊日期（本月25日、本周五等）时：
- *     如果 AI 给了具体日期 → 用 AI 的，标记 _inferredDeadline
- *     如果 AI 也返回 null → 留空，不要退回那个模糊原文
- * - 本地是具体日期且 AI 没给 → 用本地的
+ * deadline/time：绑定为同一来源。
+ * location：AI 优先，本地兜底。
+ * audience：AI 优先，本地兜底（单值字段）。
+ * materials：整套用一边，绝不拼接。
+ *   如果 AI 给了非空数组 → 整套用 AI
+ *   否则 → 整套用本地
  */
 export function mergeAIResult(ruleResult, aiResult) {
   const base = ruleResult || {};
@@ -69,7 +70,6 @@ export function mergeAIResult(ruleResult, aiResult) {
     time = aiResult.time || null;
     if (baseDeadlineIsFuzzy) inferred = true;
   } else if (baseDeadlineIsFuzzy) {
-    // 本地是模糊日期，AI 换算不出来 → 留空
     deadline = null;
     time = null;
   } else {
@@ -77,12 +77,19 @@ export function mergeAIResult(ruleResult, aiResult) {
     time = base.time || null;
   }
 
+  const aiMaterials = Array.isArray(aiResult.materials)
+    ? aiResult.materials.filter((x) => typeof x === "string" && x.trim())
+    : [];
+  const materials = aiMaterials.length > 0 ? aiMaterials : base.materials || [];
+
+  const audience = aiResult.audience || base.audience || null;
+
   return {
     deadline,
     time,
     location: aiResult.location || base.location || null,
-    materials: base.materials || [],
-    audience: base.audience || null,
+    materials,
+    audience,
     title: aiResult.title || null,
     summary: aiResult.summary || null,
     category: aiResult.category || null,

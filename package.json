@@ -15,6 +15,7 @@
     "test:share": "node scripts/test-share.mjs",
     "test:title": "node scripts/test-title.mjs",
     "test:batch": "node scripts/test-batch.mjs",
+    "test:audience-materials": "node scripts/test-audience-materials.mjs",
     "validate:ics": "node scripts/validate-ics.mjs --sample",
     "export:ics": "node scripts/export-ics.mjs"
   },

@@ -94,18 +94,26 @@ export async function POST(request) {
       }
     }
 
-    const normalize = (v) =>
+    const normalizeStr = (v) =>
       typeof v === "string" && v.trim() ? v.trim() : null;
+    const normalizeArr = (v) =>
+      Array.isArray(v)
+        ? v
+            .map((x) => (typeof x === "string" ? x.trim() : null))
+            .filter(Boolean)
+        : null;
 
     return NextResponse.json({
       ok: true,
       result: {
-        title: normalize(parsed.title),
-        deadline: normalize(parsed.deadline),
-        time: normalize(parsed.time),
-        location: normalize(parsed.location),
-        summary: normalize(parsed.summary),
-        category: normalize(parsed.category),
+        title: normalizeStr(parsed.title),
+        deadline: normalizeStr(parsed.deadline),
+        time: normalizeStr(parsed.time),
+        location: normalizeStr(parsed.location),
+        materials: normalizeArr(parsed.materials),
+        audience: normalizeStr(parsed.audience),
+        summary: normalizeStr(parsed.summary),
+        category: normalizeStr(parsed.category),
       },
     });
   } catch (err) {

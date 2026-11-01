@@ -14,13 +14,10 @@ const DATE_SOURCES = [
   { source: "(?<![0-9])([0-9]{1,2})[ ]*[-/][ ]*([0-9]{1,2})(?![0-9])", flags: "g" },
   { source: "(?:本|这|下)?[ ]*(?:周|星期)[ ]*[一二三四五六日天]", flags: "g" },
   { source: "(?:大后天|后天|明天|今天)", flags: "g" },
-  // 完整形式：本月25日 / 下月5日
   { source: "(?:本月|下月)[0-9]{1,2}[ ]*[日号]", flags: "g" },
-  // 末尾形式：本月底 / 本月初 / 10月底（“底初末”必须有，不接受光秃秃的“本月”）
   { source: "(?:[0-9]{1,2}[ ]*月[底初末]|本月[底初末]|下月[底初末])", flags: "g" },
 ];
 
-// 残缺日期：光秃秃的“本月”“下周”等，对用户没有意义，一律不作为日期
 const INCOMPLETE_DATE = new RegExp(
   "^(本周|这周|下周|本星期|这星期|下星期|本月|下月)$"
 );
@@ -217,6 +214,8 @@ const MATERIAL_WORDS = [
   "申请表", "报名表", "申请书", "承诺书", "推荐信", "介绍信",
   "名单", "表格", "复印件", "原件", "照片", "材料", "附件",
   "报告", "论文", "计划书", "简历", "身份证", "学生证",
+  "选民证", "户口本", "工作证", "团员证", "党费证",
+  "黑色笔", "签字笔", "黑色签字笔", "铅笔", "钢笔",
   "作品", "文件", "证明", "证件", "回执", "汇总表", "登记表",
 ];
 
@@ -224,8 +223,54 @@ const ACTION_RE = new RegExp(
   "(提交|报送|上交|递交|携带|准备|附上|提供|填写|打印|带|将|需|须|应|上传)"
 );
 
+const QUANTIFIER_CHARS = "支张份个本件套盒把台部只条枚页瓶包块片";
+
+function cleanMaterialItem(s) {
+  let t = String(s || "").trim();
+  if (!t) return null;
+  // 去掉开头的数字 + 量词
+  t = t.replace(
+    new RegExp("^[0-9一二三四五六七八九十]+[" + QUANTIFIER_CHARS + "]?"),
+    ""
+  );
+  // 去掉尾部“等”
+  t = t.replace(new RegExp("等$"), "");
+  t = t.trim();
+  if (t.length < 1 || t.length > 20) return null;
+  // 动词/介词开头不是物品
+  if (new RegExp("^(?:到|至|去|在|将|把|交|送|带|携|须|需|应|该|了|的)").test(t)) {
+    return null;
+  }
+  return t;
+}
+
+function extractCarryItems(text) {
+  const results = [];
+  // “带”要排除“带领/带来/带队/带头”
+  const CARRY_RE = new RegExp(
+    "(?:携带|自备|需带|须带|请带|另带|带(?!领|来|队|头))[ ]*([^。；;" + LF + "]{2,80})",
+    "g"
+  );
+  // 分隔符顺序：长的在前，避免“以及”被“及”先切
+  const SPLIT_RE = new RegExp(
+    "[、，,]|以及|还有|另需|并带|还要带|还要|和|及|与"
+  );
+
+  let m;
+  while ((m = CARRY_RE.exec(text)) !== null) {
+    const parts = m[1].split(SPLIT_RE);
+    for (const p of parts) {
+      const item = cleanMaterialItem(p);
+      if (item && !results.includes(item)) results.push(item);
+    }
+  }
+  return results;
+}
+
 function extractMaterials(text) {
   const found = [];
+
+  // 1. 白名单扫描（原有逻辑，保留）
   for (const word of MATERIAL_WORDS) {
     const idx = text.indexOf(word);
     if (idx === -1) continue;
@@ -234,17 +279,26 @@ function extractMaterials(text) {
     const context = before + after;
     const hasAction = ACTION_RE.test(before) || ACTION_RE.test(after);
     const hasOtherMaterial = MATERIAL_WORDS.some((w) => w !== word && context.includes(w));
-    if (hasAction || hasOtherMaterial) found.push(word);
+    if (hasAction || hasOtherMaterial) {
+      if (!found.includes(word)) found.push(word);
+    }
   }
 
+  // 2. 携带清单（新增）
+  const carryItems = extractCarryItems(text);
+  for (const item of carryItems) {
+    if (!found.includes(item)) found.push(item);
+  }
+
+  // 3. 列举式
   const listMatch = text.match(
     new RegExp("(?:材料|附件)[ ]*(?:包括|如下|有|含|：|:)[ ]*([^" + LF + "。；;]{1,80})")
   );
   if (listMatch) {
     const items = listMatch[1]
       .split(new RegExp("[、,，和及与]"))
-      .map((s) => s.trim().replace(/^《|》$/g, ""))
-      .filter((s) => s.length >= 2 && s.length <= 20);
+      .map((s) => cleanMaterialItem(s))
+      .filter(Boolean);
     for (const item of items) {
       if (!found.includes(item)) found.push(item);
     }
@@ -256,6 +310,7 @@ function extractMaterials(text) {
 // ---------- 面向对象 ----------
 
 function extractAudience(text) {
+  // 1. 显式标签
   const label = text.match(
     new RegExp(
       "(?:面向|针对|适用于?|参加对象|参会对象|活动对象)[ ]*[:：]?[ ]*([^" + LF + "，。；;]{2,30})"
@@ -263,9 +318,16 @@ function extractAudience(text) {
   );
   if (label) return label[1].trim();
 
+  // 2. @所有人 / @全体成员
+  const at = text.match(new RegExp("@(所有人|全体成员)"));
+  if (at) return at[1];
+
+  // 3. 群体短语
   const patterns = [
-    "(全体[一-龥]{0,8}?(?:学生|师生|同学|教师|教职工|成员|人员|本科生|研究生))",
-    "(全校[一-龥]{0,8}?(?:学生|师生|同学|教师|教职工|成员|人员|本科生|研究生))",
+    "(全体[一-龥]{0,8}?(?:学生|师生|同学|教师|教职工|成员|人员|本科生|研究生|在校生))",
+    "(全校[一-龥]{0,8}?(?:学生|师生|同学|教师|教职工|成员|人员|本科生|研究生|在校生))",
+    "(所有[一-龥]{0,8}?(?:学生|师生|同学|教师|教职工|成员|人员|本科生|研究生|在校生))",
+    "(所有人|所有同学|所有学生|所有师生|所有成员)",
     "(各[一-龥]{0,4}(?:学院|班级|班长|班|单位|部门|系|年级|支部|社团|宿舍))",
     "([0-9]{4}[ ]*级[一-龥]{0,8}?(?:学生|同学|本科生|研究生|班级))",
     "(本科生|研究生|全体学生|全校师生|全体师生)",
