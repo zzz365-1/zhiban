@@ -8,6 +8,9 @@
     "build": "next build",
     "start": "next start",
     "check:key": "node scripts/check-api-key.mjs",
+    "check:regex": "node scripts/check-regex.mjs",
+    "check:prompt": "node scripts/check-prompt-style.mjs",
+    "test:regex-lint": "node scripts/test-regex-lint.mjs",
     "test:extract": "node scripts/test-extract.mjs",
     "test:calendar": "node scripts/test-calendar.mjs",
     "test:relative": "node scripts/test-relative-dates.mjs",
@@ -19,9 +22,9 @@
     "test:materials-date": "node scripts/test-materials-date.mjs",
     "test:mode-guard": "node scripts/test-mode-guard.mjs",
     "test:sample": "node scripts/test-sample-notices.mjs",
+    "test:classify": "node scripts/test-classify.mjs",
     "validate:ics": "node scripts/validate-ics.mjs --sample",
-    "export:ics": "node scripts/export-ics.mjs",
-    "check:prompt": "node scripts/check-prompt-style.mjs"
+    "export:ics": "node scripts/export-ics.mjs"
   },
   "dependencies": {
     "next": "16.3.8",

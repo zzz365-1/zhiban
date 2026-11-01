@@ -9,6 +9,11 @@
  *   5. AI 返回的 deadline 如果仍是相对日期，本地再尝试换算一次
  *   6. AI 不可用时退回 rule_fallback，此时 deadline 已是本地换算结果
  *
+ * 错误策略：
+ *   AI 调用失败时，把错误码写进 analysis._aiErrorCode，
+ *   供界面区分“超时 / 网络 / 没密钥 / 返回格式异常”等具体原因。
+ *   错误码不吞掉，一路带到界面。
+ *
  * 永不抛异常。
  */
 
@@ -54,9 +59,16 @@ export async function parseOne(text) {
 
     return { analysis: merged };
   } catch (e) {
+    const code = e?.code || "ai_failed";
+    const message = String(e?.message || e);
     return {
-      analysis: { ...ruleResult, _source: "rule_fallback" },
-      error: String(e?.message || e),
+      analysis: {
+        ...ruleResult,
+        _source: "rule_fallback",
+        _aiErrorCode: code,
+        _aiErrorMessage: message,
+      },
+      error: { code, message },
     };
   }
 }

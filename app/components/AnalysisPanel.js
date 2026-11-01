@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { parseUserDateInput } from "../lib/deadline.js";
 import { getNoticeTitle } from "../lib/shareText.js";
+import { shortParseErrorLabel, describeParseError } from "../lib/aiExtract.js";
 
 const FIELDS = [
   { key: "title", label: "标题", editable: true },
@@ -15,11 +16,6 @@ const FIELDS = [
   { key: "category", label: "分类", ai: true, editable: false },
 ];
 
-/**
- * 取某个字段用于展示的文本。
- * title 走 getNoticeTitle 的三层兜底，和分享功能共用同一份逻辑。
- * 其余字段保持原样：数组用顿号拼接，空值显示“未识别”。
- */
 function getDisplayText(field, analysis, selectedNotice, draftText) {
   if (field.key === "title") {
     return getNoticeTitle({
@@ -35,10 +31,6 @@ function getDisplayText(field, analysis, selectedNotice, draftText) {
   return v || "未识别";
 }
 
-/**
- * 编辑时的初始值。
- * title 用同一份兜底逻辑，用户点“编辑”看到的就是当前展示的标题。
- */
 function toDraft(field, analysis, selectedNotice, draftText) {
   if (field.key === "title") {
     return getDisplayText(field, analysis, selectedNotice, draftText);
@@ -51,7 +43,17 @@ function toDraft(field, analysis, selectedNotice, draftText) {
   return v ? String(v) : "";
 }
 
-function getSourceInfo(source) {
+/**
+ * 根据 analysis._source 返回顶部标签。
+ *
+ * 【为什么 rule_fallback 要显示具体原因】
+ * 之前只显示“模型未接入，已退回本地”，用户分不清是超时、网络断、
+ * 还是没配密钥。后来把错误码一路带到这里，根据 code 显示不同短标签，
+ * 让用户一眼看出栽在哪一步。
+ */
+function getSourceInfo(analysis) {
+  if (!analysis) return null;
+  const source = analysis._source;
   if (source === "manual") {
     return { text: "手动修正", cls: "bg-green-50 text-green-700" };
   }
@@ -60,7 +62,7 @@ function getSourceInfo(source) {
   }
   if (source === "rule_fallback") {
     return {
-      text: "模型未接入，已退回本地",
+      text: shortParseErrorLabel(analysis._aiErrorCode),
       cls: "bg-amber-50 text-amber-700",
     };
   }
@@ -77,7 +79,12 @@ export default function AnalysisPanel({
   const [draft, setDraft] = useState("");
   const [error, setError] = useState("");
 
-  const sourceInfo = analysis ? getSourceInfo(analysis._source) : null;
+  const sourceInfo = getSourceInfo(analysis);
+
+  // 只有 rule_fallback 才显示详细错误横幅。
+  // 手动修正后 _source 变成 manual，横幅自然消失。
+  const showErrorBanner =
+    analysis && analysis._source === "rule_fallback" && analysis._aiErrorCode;
 
   function startEdit(field) {
     setEditingKey(field.key);
@@ -152,6 +159,20 @@ export default function AnalysisPanel({
 
         {analysis && (
           <>
+            {showErrorBanner && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+                <p className="text-xs font-semibold text-amber-800">
+                  模型调用失败
+                </p>
+                <p className="mt-1 text-xs leading-relaxed text-amber-700">
+                  {describeParseError(analysis._aiErrorCode)}
+                </p>
+                <p className="mt-1.5 text-xs leading-relaxed text-amber-600">
+                  以下结果来自本地规则，可能不完整。可以点「解析」重新试一次。
+                </p>
+              </div>
+            )}
+
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
               <p className="text-xs font-medium text-slate-400">当前通知</p>
               <p className="mt-1 text-sm font-medium leading-snug text-slate-800">
