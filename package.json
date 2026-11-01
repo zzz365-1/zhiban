@@ -17,6 +17,7 @@
     "test:batch": "node scripts/test-batch.mjs",
     "test:audience-materials": "node scripts/test-audience-materials.mjs",
     "test:materials-date": "node scripts/test-materials-date.mjs",
+    "test:mode-guard": "node scripts/test-mode-guard.mjs",
     "validate:ics": "node scripts/validate-ics.mjs --sample",
     "export:ics": "node scripts/export-ics.mjs"
   },

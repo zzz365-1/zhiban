@@ -10,12 +10,6 @@
  *         原样返回 1 条
  *      b. 否则若内容像单条，原样返回 1 条
  *      c. 否则若内容明显有多条迹象，报错，不硬拆
- *
- * “多条迹象”判定（任一命中且无编号列表时拒绝）：
- *   - “请于”≥4 次且长度 > 100
- *   - 长度 > 400 且“请于”≥2 次
- *   - 长度 > 400 且截止类动作词（截止/报送/提交/报名）≥3 次
- *   - 长度 > 1000
  */
 
 const CR = String.fromCharCode(13);
@@ -33,11 +27,10 @@ const WS_RE = new RegExp("[" + WS_CHARS + "]+", "g");
 
 const HEADER_RE = new RegExp("^关于.+?的通知[：:]?$");
 
-// 行首编号的三类常见写法
 const NUMBERED_PATTERNS = [
-  new RegExp("^[一二三四五六七八九十]+[、.．]"), // 一、 二． 十一、
-  new RegExp("^[（(][一二三四五六七八九十0-9]+[）)]"), // （一） (1)
-  new RegExp("^[0-9]+[、.．)）]"), // 1、 2. 3) 4）
+  new RegExp("^[一二三四五六七八九十]+[、.．]"),
+  new RegExp("^[（(][一二三四五六七八九十0-9]+[）)]"),
+  new RegExp("^[0-9]+[、.．)）]"),
 ];
 
 function normalizeLineEndings(text) {
@@ -85,10 +78,6 @@ function countSubstring(text, sub) {
   return count;
 }
 
-/**
- * 统计行首编号条目数。
- * 只认独立成行的编号（行首、可前置空白），正文里的“第1项”不算。
- */
 function countNumberedItems(lines) {
   let count = 0;
   for (const line of lines) {
@@ -104,13 +93,6 @@ function countNumberedItems(lines) {
   return count;
 }
 
-/**
- * 判断“一段没有被明确边界切开的文本”是否看起来像多条通知堆在一起。
- * 命中即视为“分不开”，让用户去加空行或加标题，而不是硬拆。
- *
- * 前置判断：行首编号列表 ≥2 项 → 这是单条通知的结构化条目，
- * 不是多条通知堆叠，直接返回 false。
- */
 function looksLikeMultipleNotices(text, lines) {
   const numbered = countNumberedItems(lines);
   if (numbered >= 2) return false;
@@ -130,11 +112,6 @@ function looksLikeMultipleNotices(text, lines) {
   return false;
 }
 
-/**
- * @param {string} raw
- * @returns {{ ok: true, items: string[], method: string }
- *         | { ok: false, reason: string }}
- */
 export function splitNotices(raw) {
   const text = normalizeLineEndings(raw).trim();
   if (!text) return { ok: false, reason: "没有可解析的内容" };
@@ -143,12 +120,10 @@ export function splitNotices(raw) {
   const headerIndices = findHeaderIndices(lines);
   const blocks = splitByBlankLines(text);
 
-  // 策略1：空行分出 ≥2 条
   if (blocks.length >= 2) {
     return { ok: true, items: blocks, method: "blank-line" };
   }
 
-  // 策略2：≥2 个“关于……的通知”标题，按标题行切
   if (headerIndices.length >= 2) {
     const items = [];
     for (let i = 0; i < headerIndices.length; i++) {
@@ -170,7 +145,6 @@ export function splitNotices(raw) {
     return { ok: true, items, method: "header" };
   }
 
-  // 策略3：看起来像单条，原样返回；看起来像多条但切不开，报错
   if (blocks.length === 1) {
     if (looksLikeMultipleNotices(text, lines)) {
       return {
@@ -185,16 +159,10 @@ export function splitNotices(raw) {
   return { ok: false, reason: "无法识别通知边界" };
 }
 
-/**
- * 去重用的规范化：折叠所有空白为单空格、去掉首尾空白。
- */
 export function normalizeForDedup(text) {
   return String(text || "").replace(WS_RE, " ").trim();
 }
 
-/**
- * 判断 text 是否与列表中任一通知重复。
- */
 export function isDuplicate(text, notices) {
   const target = normalizeForDedup(text);
   if (!target) return false;
@@ -202,4 +170,23 @@ export function isDuplicate(text, notices) {
     if (normalizeForDedup(n.text) === target) return true;
   }
   return false;
+}
+
+/**
+ * 快速判断一段文本大概有几条通知。
+ * 返回 { count: number|null, confident: boolean }
+ *   - confident = false：拿不准（内容像多条但分不开，或空文本）
+ *   - count = 1 且 confident = true：确定是单条
+ *   - count >= 2 且 confident = true：确定是多条
+ * 不调用模型，纯本地判断，毫秒级返回。
+ */
+export function detectNoticeCount(raw) {
+  const result = splitNotices(raw);
+  if (!result.ok) {
+    return { count: null, confident: false };
+  }
+  if (result.items.length >= 2) {
+    return { count: result.items.length, confident: true };
+  }
+  return { count: 1, confident: true };
 }

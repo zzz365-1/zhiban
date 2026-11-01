@@ -8,12 +8,12 @@ import AnalysisPanel from "./components/AnalysisPanel";
 import TodoList from "./components/TodoList";
 import CalendarView from "./components/CalendarView";
 import ShareDialog from "./components/ShareDialog";
-import BatchDialog from "./components/BatchDialog";
 import { buildDeadlineDate } from "./lib/deadline.js";
 import { getTodoItems } from "./lib/todo.js";
 import { updateNoticeAnalysis } from "./lib/noticeOps.js";
 import { parseOne } from "./lib/parseOne.js";
 import { isDuplicate } from "./lib/splitNotices.js";
+import { checkModeMismatch } from "./lib/modeGuard.js";
 
 const STORAGE_KEY = "zhiban.notices.v1";
 
@@ -72,7 +72,9 @@ export default function Home() {
   const [searchQuery, setSearchQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("全部");
   const [showShare, setShowShare] = useState(false);
-  const [showBatch, setShowBatch] = useState(false);
+  const [inputMode, setInputMode] = useState("single");
+  const [warningCandidate, setWarningCandidate] = useState(null);
+  const [warningDismissed, setWarningDismissed] = useState(false);
 
   useEffect(() => {
     try {
@@ -95,6 +97,26 @@ export default function Home() {
       console.warn("保存本地通知失败：", e);
     }
   }, [notices, hydrated]);
+
+  // 内容或模式变化后，延迟 300ms 检测是否不匹配
+  useEffect(() => {
+    setWarningDismissed(false);
+
+    if (!noticeText.trim()) {
+      setWarningCandidate(null);
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      const result = checkModeMismatch(noticeText, inputMode);
+      setWarningCandidate(result.shouldWarn ? result : null);
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [noticeText, inputMode]);
+
+  const warning =
+    warningCandidate && !warningDismissed ? warningCandidate : null;
 
   const now = Date.now();
   const filtered = filterNotices(notices, searchQuery, categoryFilter);
@@ -166,38 +188,53 @@ export default function Home() {
   }
 
   function handleBatchSave(items) {
-    if (!items.length) {
-      setShowBatch(false);
-      return;
+    if (items && items.length > 0) {
+      const newNotices = [];
+      const seen = notices.slice();
+      let seed = 0;
+
+      for (const item of items) {
+        if (isDuplicate(item.text, seen)) continue;
+        const deadlineDate = buildDeadlineDate(
+          item.analysis.deadline,
+          item.analysis.time
+        );
+        const notice = {
+          id: makeId(seed++),
+          title: item.analysis.title || deriveTitle(item.text),
+          source: sourceLabel(item.analysis._source),
+          text: item.text,
+          analysis: item.analysis,
+          deadlineDate: deadlineDate ? deadlineDate.getTime() : null,
+          savedAt: Date.now(),
+        };
+        newNotices.push(notice);
+        seen.push(notice);
+      }
+
+      if (newNotices.length > 0) {
+        setNotices((prev) => [...newNotices, ...prev]);
+      }
     }
 
-    const newNotices = [];
-    const seen = notices.slice();
-    let seed = 0;
+    setNoticeText("");
+    setSelectedId(null);
+    setAnalysis(null);
+    setWarningCandidate(null);
+    setWarningDismissed(false);
+  }
 
-    for (const item of items) {
-      if (isDuplicate(item.text, seen)) continue;
-      const deadlineDate = buildDeadlineDate(
-        item.analysis.deadline,
-        item.analysis.time
-      );
-      const notice = {
-        id: makeId(seed++),
-        title: item.analysis.title || deriveTitle(item.text),
-        source: sourceLabel(item.analysis._source),
-        text: item.text,
-        analysis: item.analysis,
-        deadlineDate: deadlineDate ? deadlineDate.getTime() : null,
-        savedAt: Date.now(),
-      };
-      newNotices.push(notice);
-      seen.push(notice);
-    }
+  function handleModeChange(newMode) {
+    setInputMode(newMode);
+  }
 
-    if (newNotices.length > 0) {
-      setNotices((prev) => [...newNotices, ...prev]);
-    }
-    setShowBatch(false);
+  function handleSwitchMode(newMode) {
+    setInputMode(newMode);
+    setWarningDismissed(true);
+  }
+
+  function handleDismissWarning() {
+    setWarningDismissed(true);
   }
 
   const leftWidth = activeTab === "calendar" ? "360px" : "260px";
@@ -213,7 +250,6 @@ export default function Home() {
         onCategoryChange={setCategoryFilter}
         parsing={parsing}
         onOpenShare={() => setShowShare(true)}
-        onOpenBatch={() => setShowBatch(true)}
       />
 
       <div
@@ -245,6 +281,13 @@ export default function Home() {
           saveLabel={
             selectedId ? "已保存" : parsing ? "解析中…" : "保存到我的通知"
           }
+          mode={inputMode}
+          onModeChange={handleModeChange}
+          warning={warning}
+          onDismissWarning={handleDismissWarning}
+          onSwitchMode={handleSwitchMode}
+          onBatchSave={handleBatchSave}
+          existingNotices={notices}
         />
 
         <AnalysisPanel
@@ -260,14 +303,6 @@ export default function Home() {
           notices={notices}
           now={now}
           onClose={() => setShowShare(false)}
-        />
-      )}
-
-      {showBatch && (
-        <BatchDialog
-          existingNotices={notices}
-          onSave={handleBatchSave}
-          onClose={() => setShowBatch(false)}
         />
       )}
     </div>
