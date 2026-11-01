@@ -1,24 +1,14 @@
 /**
- * 客户端调用 /api/parse 的薄封装，以及 AI 结果的合并与校验。
+ * 客户端调用 /api/parse 的薄封装，以及 AI 结果的合并、校验、出处核对。
  */
 
-/**
- * 分类白名单。
- *
- * 【为什么要在 mergeAIResult 里拦】
- * AI 返回的 category 是不可信输入。prompt 里写了“只能是这五类之一”，
- * 但模型不保证遵守——它可能返回“球赛”“教学”“教务通知”这类原文里
- * 出现但不在白名单内的词。如果不校验，界面会原样显示，用户看不出问题。
- * 放在这里校验的原因：mergeAIResult 是 AI 结果进入系统的唯一入口。
- * 拦截点选在唯一入口，下游（页面展示、保存到 localStorage、日历）全部安全。
- * 不放在 route 里：那会造成“route 拦一次、merge 再拦一次”，两处逻辑。
- */
+import {
+  groundStringValue,
+  groundDateValue,
+} from "./grounding.js";
+
 export const VALID_CATEGORIES = ["教务", "活动", "行政", "后勤", "其他"];
 
-/**
- * 校验并规范化分类值。合法值保留，非法值一律返回 null（显示为“未识别”）。
- * 不做模糊匹配——“教务通知”不是“教务”，不能猜。
- */
 export function normalizeCategory(v) {
   if (typeof v !== "string") return null;
   const t = v.trim();
@@ -26,9 +16,6 @@ export function normalizeCategory(v) {
   return t;
 }
 
-/**
- * 错误码 → 短标签（用于顶部小标签，字数受限）
- */
 const SHORT_ERROR_LABEL = {
   no_key: "未配密钥",
   timeout: "响应超时",
@@ -47,20 +34,6 @@ export function shortParseErrorLabel(code) {
   return "调用失败";
 }
 
-/**
- * 错误码 → 完整说明（用于面板里那块提示）
- *
- * 【为什么要区分具体原因】
- * 真实踩过坑：解析失败时界面只有一句“模型未接入，已退回本地”，
- * 用户不知道是超时、网络断了、还是密钥没配。用户以为是程序坏了，
- * 以为是粘贴时丢字了，反复重试。把原因说清楚，用户才能判断
- * “是该等一会儿再试”“该检查网络”还是“该去配密钥”。
- *
- * 【为什么 no_key 的文案里同时写“密钥”和 DEEPSEEK_API_KEY】
- * 用户体验上，“密钥”这两个中文字让学生一眼就懂该去配什么；
- * 开发者排查时也需要看到 DEEPSEEK_API_KEY 这个技术名才能定位。
- * 两者缺一不可。
- */
 const LONG_ERROR_TEXT = {
   no_key: "未配置模型密钥（DEEPSEEK_API_KEY），无法调用模型。",
   timeout: "模型响应超时（超过 20 秒）。可能是网络慢或服务繁忙。",
@@ -82,10 +55,6 @@ export function describeParseError(code) {
   return "模型调用失败，具体原因未知。";
 }
 
-/**
- * 调用 /api/parse。
- * 失败时抛出的 Error 带 .code 字段，供上层区分具体原因。
- */
 export async function callAIExtract(text) {
   const res = await fetch("/api/parse", {
     method: "POST",
@@ -111,18 +80,6 @@ export async function callAIExtract(text) {
   return data.result;
 }
 
-/**
- * 周几前缀正则。跟 relativeDate.js 的 WEEK_PREFIX_RE 完全一致。
- *
- * 【为什么必须和 relativeDate.js 一模一样】
- * 这个正则决定 isFuzzyDate 认不认“这个星期三”“下个星期三”这些说法。
- * isFuzzyDate 返回 true 才会触发本地换算（parseOne 里）；返回 false 就
- * 交给 AI 兜底。上一轮我把它简化成 (下一周|下个星期|这个星期|这个周|本|这|下)?，
- * 结果“这个星期三”的前缀“这个星期”把“星期”吃进去，剩下“三”，
- * 后面 (周|星期) 匹配不上，isFuzzyDate 返回 false，本地不算，又退回 AI。
- * 用户明确说“模型算日子偶尔会差一天，差了还看不出来”，不能再交回 AI。
- * 所以两边必须共享同一份前缀定义，不能各自维护一份“差不多”的。
- */
 const WEEK_PREFIX_RE =
   "(?:下下个星期|下下个|下下|下一个|下个星期|这个星期|这一个星期|下一个|本星期|下一周|下个|这个|这一个|本周|下|本|这)?";
 
@@ -155,30 +112,38 @@ export function isRuleResultGood(ruleResult) {
 }
 
 /**
- * 合并 AI 结果。
+ * 合并 AI 结果，并做出处核对。
  *
  * 【日期和时间必须同源】
  * 一条通知里有两个日期时，本地抓到的“时间”可能是活动开始时间，
  * 而 AI 补上的是截止日期，两者拼起来会得到原文里不存在的时刻。
  * 所以 deadline 和 time 作为一组不可拆字段，同来源同取舍。
  *
- * deadline 顺序：
- *   1. 本地已通过 relativeDate 换算确定具体日期 → 用本地的
- *   2. AI 给了 deadline → 用 AI 的
- *   3. 本地是模糊日期（AI 也搞不定）→ 留空，绝不退回模糊原文
- *   4. 否则用本地的
+ * 【出处核对：只核对“应该从原文抄”的字段】
+ * - deadline / time / location / materials / audience：核对
+ * - title / summary / category：不核对（模型组织出来的）
+ * - 本地已换算的 deadline（_locallyResolved）：直接放行
+ * - 时间如果跟着 deadline 被拦，一起拦（日期时间同源）
  *
- * location / audience：AI 优先，本地兜底。
- * materials：整套用一边，绝不拼接。
- * category：必须经过白名单校验，非法值一律变 null。
+ * 【核对失败的处理】
+ * - location / time / materials：清空该值，记入 _groundingDropped
+ * - audience：退回本地值（如果有），否则清空并记录
+ * - deadline：清空，同时清空 time（日期时间同源）
+ *
+ * 【sourceText 参数】
+ * 生产环境必须传原文。传 undefined 时跳过核对（向后兼容老测试），
+ * 但实际调用点（parseOne）必须传 text。
  */
-export function mergeAIResult(ruleResult, aiResult) {
+export function mergeAIResult(ruleResult, aiResult, sourceText) {
   const base = ruleResult || {};
+  const skipGrounding = sourceText === undefined;
+
   const baseDeadlineIsResolved =
     Boolean(base._locallyResolved) && Boolean(base.deadline);
   const baseDeadlineIsFuzzy =
     Boolean(base.deadline) && isFuzzyDate(base.deadline);
 
+  // ---- 第一步：字段来源选择（原有逻辑） ----
   let deadline;
   let time;
   let inferred = false;
@@ -203,18 +168,151 @@ export function mergeAIResult(ruleResult, aiResult) {
     : [];
   const materials = aiMaterials.length > 0 ? aiMaterials : base.materials || [];
 
-  const audience = aiResult.audience || base.audience || null;
+  let location = aiResult.location || base.location || null;
+  let audience = aiResult.audience || base.audience || null;
+
+  const title = aiResult.title || null;
+  const summary = aiResult.summary || null;
+  const category = normalizeCategory(aiResult.category);
+
+  // ---- 第二步：出处核对 ----
+  if (skipGrounding) {
+    return {
+      deadline,
+      time,
+      location,
+      materials,
+      audience,
+      title,
+      summary,
+      category,
+      _source: "mixed",
+      _inferredDeadline: inferred,
+      _groundingSkipped: true,
+      _groundingPositions: {},
+      _groundingDropped: [],
+    };
+  }
+
+  const positions = {};
+  const dropped = [];
+
+  // deadline：本地已换算的直接放行，不核对
+  let finalDeadline = deadline;
+  let finalTime = time;
+
+  if (!baseDeadlineIsResolved && finalDeadline) {
+    const g = groundDateValue(finalDeadline, sourceText);
+    if (g.accepted) {
+      if (g.position) positions.deadline = g.position;
+      // deadline 通过 → time 单独核对
+      if (finalTime) {
+        const gt = groundStringValue(finalTime, sourceText);
+        if (gt.accepted) {
+          if (gt.position) positions.time = gt.position;
+        } else {
+          dropped.push({
+            field: "time",
+            value: finalTime,
+            reason: gt.reason,
+          });
+          finalTime = null;
+        }
+      }
+    } else {
+      dropped.push({
+        field: "deadline",
+        value: finalDeadline,
+        reason: g.reason,
+      });
+      if (finalTime) {
+        dropped.push({
+          field: "time",
+          value: finalTime,
+          reason: "日期被拦，时间一起拦",
+        });
+      }
+      finalDeadline = null;
+      finalTime = null;
+    }
+  }
+
+  // location
+  let finalLocation = location;
+  if (finalLocation) {
+    const g = groundStringValue(finalLocation, sourceText);
+    if (g.accepted) {
+      if (g.position) positions.location = g.position;
+    } else {
+      dropped.push({
+        field: "location",
+        value: finalLocation,
+        reason: g.reason,
+      });
+      // 退回本地值（本地值来自原文抽取，通常能找到）
+      finalLocation = base.location || null;
+      if (finalLocation) {
+        const g2 = groundStringValue(finalLocation, sourceText);
+        if (!g2.accepted) {
+          dropped.push({
+            field: "location",
+            value: finalLocation,
+            reason: "本地值也找不到出处，清空",
+          });
+          finalLocation = null;
+        } else if (g2.position) {
+          positions.location = g2.position;
+        }
+      }
+    }
+  }
+
+  // materials：逐个核对
+  const finalMaterials = [];
+  for (const m of materials) {
+    const g = groundStringValue(m, sourceText);
+    if (g.accepted) {
+      finalMaterials.push(m);
+      if (g.position) {
+        if (!positions.materials) positions.materials = [];
+        positions.materials.push(g.position);
+      }
+    } else {
+      dropped.push({ field: "materials", value: m, reason: g.reason });
+    }
+  }
+
+  // audience：宽松处理
+  let finalAudience = audience;
+  if (audience) {
+    const g = groundStringValue(audience, sourceText);
+    if (g.accepted) {
+      if (g.position) positions.audience = g.position;
+    } else if (base.audience && base.audience !== audience) {
+      dropped.push({
+        field: "audience",
+        value: audience,
+        reason: "AI 值找不到出处，退回本地值",
+      });
+      finalAudience = base.audience;
+    } else {
+      dropped.push({ field: "audience", value: audience, reason: g.reason });
+      finalAudience = null;
+    }
+  }
 
   return {
-    deadline,
-    time,
-    location: aiResult.location || base.location || null,
-    materials,
-    audience,
-    title: aiResult.title || null,
-    summary: aiResult.summary || null,
-    category: normalizeCategory(aiResult.category),
+    deadline: finalDeadline,
+    time: finalTime,
+    location: finalLocation,
+    materials: finalMaterials,
+    audience: finalAudience,
+    title,
+    summary,
+    category,
     _source: "mixed",
     _inferredDeadline: inferred,
+    _groundingPositions: positions,
+    _groundingDropped: dropped,
   };
 }

@@ -9,10 +9,14 @@
  *   5. AI 返回的 deadline 如果仍是相对日期，本地再尝试换算一次
  *   6. AI 不可用时退回 rule_fallback，此时 deadline 已是本地换算结果
  *
+ * 出处核对策略：
+ *   AI 结果合并时把原文传进 mergeAIResult，模型返回的每个值
+ *   都会回原文核对出处。找不到的值会被去掉，记录在 _groundingDropped。
+ *   本地已换算的日期（_locallyResolved）直接放行，不核对。
+ *
  * 错误策略：
  *   AI 调用失败时，把错误码写进 analysis._aiErrorCode，
  *   供界面区分“超时 / 网络 / 没密钥 / 返回格式异常”等具体原因。
- *   错误码不吞掉，一路带到界面。
  *
  * 永不抛异常。
  */
@@ -30,7 +34,6 @@ export async function parseOne(text) {
   const now = new Date();
   const ruleResult = extractNotice(text);
 
-  // 本地优先换算相对日期
   if (ruleResult.deadline && isFuzzyDate(ruleResult.deadline)) {
     const resolved = resolveRelativeDate(ruleResult.deadline, now);
     if (resolved) {
@@ -45,9 +48,8 @@ export async function parseOne(text) {
 
   try {
     const aiResult = await callAIExtract(text);
-    const merged = mergeAIResult(ruleResult, aiResult);
+    const merged = mergeAIResult(ruleResult, aiResult, text);
 
-    // AI 返回的 deadline 如果仍是相对日期，本地再换算一次
     if (merged.deadline && isFuzzyDate(merged.deadline)) {
       const resolved = resolveRelativeDate(merged.deadline, now);
       if (resolved) {
