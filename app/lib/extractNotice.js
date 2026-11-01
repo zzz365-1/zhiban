@@ -225,52 +225,97 @@ const ACTION_RE = new RegExp(
 
 const QUANTIFIER_CHARS = "支张份个本件套盒把台部只条枚页瓶包块片";
 
+const PUNCT_CHARS = "。，、；：！？.,;:!?（）()【】「」《》<>";
+
+const LEADING_STOP_RE = new RegExp(
+  "^(?:到|至|去|在|将|把|交|送|带|携|须|需|应|该|了|的|请|并|或)"
+);
+
+const RE_PAREN_CN = new RegExp("（[^（）]*）", "g");
+const RE_PAREN_EN = new RegExp("[（(][^()（）]*[）)]", "g");
+
+/**
+ * 去掉成对的括号及其内容。
+ * 循环最多 5 次，处理一层嵌套；通常校园通知不嵌套，1-2 次足够。
+ */
+function stripParentheses(text) {
+  let result = String(text || "");
+  for (let i = 0; i < 5; i++) {
+    const before = result;
+    result = result.replace(RE_PAREN_CN, "");
+    result = result.replace(RE_PAREN_EN, "");
+    if (result === before) break;
+  }
+  return result;
+}
+
+/**
+ * 去掉首尾标点。用字符集 + 双指针，避免构造带转义的正则。
+ */
+function trimPunctuation(s) {
+  let start = 0;
+  let end = s.length;
+  while (start < end && PUNCT_CHARS.includes(s[start])) start++;
+  while (end > start && PUNCT_CHARS.includes(s[end - 1])) end--;
+  return s.slice(start, end);
+}
+
 function cleanMaterialItem(s) {
   let t = String(s || "").trim();
   if (!t) return null;
-  // 去掉开头的数字 + 量词
+
+  // 1. 去首尾标点
+  t = trimPunctuation(t);
+
+  // 2. 去数量词前缀（一支 / 三份 / 2张）
   t = t.replace(
     new RegExp("^[0-9一二三四五六七八九十]+[" + QUANTIFIER_CHARS + "]?"),
     ""
   );
-  // 去掉尾部“等”
+
+  // 3. 去尾部“等”
   t = t.replace(new RegExp("等$"), "");
-  t = t.trim();
+
+  // 4. 再次去首尾标点（量词去掉后可能露出标点）
+  t = trimPunctuation(t.trim());
+
   if (t.length < 1 || t.length > 20) return null;
-  // 动词/介词开头不是物品
-  if (new RegExp("^(?:到|至|去|在|将|把|交|送|带|携|须|需|应|该|了|的)").test(t)) {
-    return null;
-  }
+  if (LEADING_STOP_RE.test(t)) return null;
   return t;
 }
 
 function extractCarryItems(text) {
   const results = [];
-  // “带”要排除“带领/带来/带队/带头”
+
+  // “带”排除带领/带来/带队/带头
   const CARRY_RE = new RegExp(
-    "(?:携带|自备|需带|须带|请带|另带|带(?!领|来|队|头))[ ]*([^。；;" + LF + "]{2,80})",
+    "(?:携带|自备|需带|须带|请带|另带|带(?!领|来|队|头))[ ]*([^。；;" + LF + "]{2,200})",
     "g"
   );
-  // 分隔符顺序：长的在前，避免“以及”被“及”先切
+  // 分隔符长的在前，避免“以及”被“及”先切开
   const SPLIT_RE = new RegExp(
     "[、，,]|以及|还有|另需|并带|还要带|还要|和|及|与"
   );
 
   let m;
   while ((m = CARRY_RE.exec(text)) !== null) {
-    const parts = m[1].split(SPLIT_RE);
+    // 关键顺序：先去掉括号内容，再分割。
+    // 若先分割，括号里的逗号会把说明切成碎片。
+    const cleaned = stripParentheses(m[1]);
+    const parts = cleaned.split(SPLIT_RE);
     for (const p of parts) {
       const item = cleanMaterialItem(p);
       if (item && !results.includes(item)) results.push(item);
     }
   }
+
   return results;
 }
 
 function extractMaterials(text) {
   const found = [];
 
-  // 1. 白名单扫描（原有逻辑，保留）
+  // 1. 白名单扫描
   for (const word of MATERIAL_WORDS) {
     const idx = text.indexOf(word);
     if (idx === -1) continue;
@@ -284,18 +329,19 @@ function extractMaterials(text) {
     }
   }
 
-  // 2. 携带清单（新增）
+  // 2. 携带清单
   const carryItems = extractCarryItems(text);
   for (const item of carryItems) {
     if (!found.includes(item)) found.push(item);
   }
 
-  // 3. 列举式
+  // 3. 列举式（同样要先清括号再去标点）
   const listMatch = text.match(
     new RegExp("(?:材料|附件)[ ]*(?:包括|如下|有|含|：|:)[ ]*([^" + LF + "。；;]{1,80})")
   );
   if (listMatch) {
-    const items = listMatch[1]
+    const cleanedList = stripParentheses(listMatch[1]);
+    const items = cleanedList
       .split(new RegExp("[、,，和及与]"))
       .map((s) => cleanMaterialItem(s))
       .filter(Boolean);
@@ -310,7 +356,6 @@ function extractMaterials(text) {
 // ---------- 面向对象 ----------
 
 function extractAudience(text) {
-  // 1. 显式标签
   const label = text.match(
     new RegExp(
       "(?:面向|针对|适用于?|参加对象|参会对象|活动对象)[ ]*[:：]?[ ]*([^" + LF + "，。；;]{2,30})"
@@ -318,11 +363,9 @@ function extractAudience(text) {
   );
   if (label) return label[1].trim();
 
-  // 2. @所有人 / @全体成员
   const at = text.match(new RegExp("@(所有人|全体成员)"));
   if (at) return at[1];
 
-  // 3. 群体短语
   const patterns = [
     "(全体[一-龥]{0,8}?(?:学生|师生|同学|教师|教职工|成员|人员|本科生|研究生|在校生))",
     "(全校[一-龥]{0,8}?(?:学生|师生|同学|教师|教职工|成员|人员|本科生|研究生|在校生))",

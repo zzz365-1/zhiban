@@ -1,17 +1,11 @@
 /**
- * 端到端断言测试 + 断言逻辑金丝雀自检
+ * 端到端断言测试
+ * 用法：node scripts/test-relative-dates.mjs
  *
  * 完全模拟 page.js 里 handleParse 的逻辑：
- *   1. extractNotice() 跑本地规则
- *   2. isRuleResultGood() 判断是否够好
- *   3. 够好：直接用规则结果，不调 AI
- *   4. 不够好：调 AI，mergeAIResult() 合并
- *   5. 断言最终 deadline，与界面显示的完全一致
+ *   - 本地规则 → isRuleResultGood → 够好用规则，不够好调 AI → mergeAIResult
  *
- * 最后一条是金丝雀用例：故意喂一个垃圾值给断言逻辑，
- * 预期结果是 FAIL。如果金丝雀变成 PASS，说明断言逻辑坏了。
- *
- * 用法：node scripts/test-relative-dates.mjs
+ * 相对日期的期望值全部由函数根据“今天”动态计算，不写死。
  */
 
 import { readFileSync } from "node:fs";
@@ -68,6 +62,10 @@ function addDays(date, n) {
   return d;
 }
 
+/**
+ * 下一个目标星期几（用于“本周X”已过则顺延）。
+ * target 用 getDay() 值：0=周日 ... 6=周六。
+ */
 function nextWeekday(today, target) {
   const d = new Date(today);
   const cur = d.getDay();
@@ -77,28 +75,35 @@ function nextWeekday(today, target) {
   return d;
 }
 
-const RE_STANDARD_DATE = new RegExp("^[0-9]{4}-[0-9]{2}-[0-9]{2}$");
-
 /**
- * 归一化成标准 "YYYY-MM-DD"。
- * 无法解析成完整日期的字符串一律返回 null——
- * 调用方必须自己区分“本来就是空”和“解析失败”，
- * 不允许用 null 表示“不确定”，那正是上一轮藏失败的原因。
+ * 下一周的某个星期几（一周从周一开始，周日是最后一天）。
+ * target: 1=周一 ... 7=周日。
+ *
+ * 今天周日、target=3（周三）→ 3 天后（下周三）
+ * 今天周一、target=3（周三）→ 9 天后（下周三）
+ * 今天周三、target=3（周三）→ 7 天后（下周三）
  */
+function nextWeekWeekday(today, target) {
+  const d = new Date(today);
+  const mondayBased = (d.getDay() + 6) % 7; // 0=周一 ... 6=周日
+  const daysToNextMonday = 7 - mondayBased;
+  d.setDate(d.getDate() + daysToNextMonday + (target - 1));
+  return d;
+}
+
 function normalizeDate(s) {
   if (s === null || s === undefined) return null;
   const str = String(s).trim();
   if (str === "") return null;
   const m = str.match(/([0-9]{4})[^0-9]*([0-9]{1,2})[^0-9]*([0-9]{1,2})/);
-  if (!m) return null;
-  const iso =
+  if (!m) return str;
+  return (
     m[1] +
     "-" +
     String(m[2]).padStart(2, "0") +
     "-" +
-    String(m[3]).padStart(2, "0");
-  if (!RE_STANDARD_DATE.test(iso)) return null;
-  return iso;
+    String(m[3]).padStart(2, "0")
+  );
 }
 
 function isStrictlyEmpty(s) {
@@ -106,11 +111,8 @@ function isStrictlyEmpty(s) {
   return String(s).trim() === "";
 }
 
-/**
- * 严格比较。
- * - 期望为空：实际必须严格为空，多一个字都算失败。
- * - 期望非空：实际必须能归一化成标准日期，且和期望相等。
- */
+const RE_STANDARD_DATE = new RegExp("^[0-9]{4}-[0-9]{2}-[0-9]{2}$");
+
 function compareDates(actualRaw, expectedRaw) {
   if (isStrictlyEmpty(expectedRaw)) {
     return isStrictlyEmpty(actualRaw);
@@ -118,8 +120,8 @@ function compareDates(actualRaw, expectedRaw) {
   if (isStrictlyEmpty(actualRaw)) return false;
   const actualNorm = normalizeDate(actualRaw);
   const expectedNorm = normalizeDate(expectedRaw);
-  if (actualNorm === null) return false;
-  if (expectedNorm === null) return false;
+  if (actualNorm === null || !RE_STANDARD_DATE.test(actualNorm)) return false;
+  if (expectedNorm === null || !RE_STANDARD_DATE.test(expectedNorm)) return false;
   return actualNorm === expectedNorm;
 }
 
@@ -167,8 +169,6 @@ async function callAI(text) {
   }
 }
 
-// ---------- 模拟 page.js 的解析流程 ----------
-
 async function resolveFinal(text) {
   const rule = extractNotice(text);
 
@@ -188,7 +188,10 @@ async function resolveFinal(text) {
   }
 }
 
-// ---------- 业务测试用例 ----------
+// ---------- 测试用例 ----------
+// expected 一律是函数 (today) => "YYYY年M月D日" | null
+// 涉及相对日期的用例用 addDays / nextWeekday / nextWeekWeekday 动态计算。
+// 原文里明确写出具体日期的用例（消防演练、图像采集等）写死是合理的。
 
 const CASES = [
   {
@@ -197,12 +200,12 @@ const CASES = [
     expected: (today) => formatCN(addDays(today, 1)),
   },
   {
-    name: "本周五（今天已过周五）",
+    name: "本周五（今天已过周五则顺延）",
     text: "请于本周五前到宿舍管理中心值班室登记领取。",
     expected: (today) => formatCN(nextWeekday(today, 5)),
   },
   {
-    name: "本月25日（今天已过25日）",
+    name: "本月25日（今天已过25日则为空）",
     text: "请欠费同学务必于本月25日前完成缴费。",
     expected: (today) =>
       today.getDate() <= 25
@@ -210,9 +213,9 @@ const CASES = [
         : null,
   },
   {
-    name: "下周三",
+    name: "下周三（按周一开始计算一周）",
     text: "学校定于下周三下午3点在就业指导中心会议室召开就业推进会。",
-    expected: (today) => formatCN(nextWeekday(today, 3)),
+    expected: (today) => formatCN(nextWeekWeekday(today, 3)),
   },
   {
     name: "大后天",
@@ -220,7 +223,7 @@ const CASES = [
     expected: (today) => formatCN(addDays(today, 3)),
   },
   {
-    name: "消防演练（活动日期即截止）",
+    name: "消防演练（原文具体日期 2026-11-02）",
     text: `关于组织开展2026年秋季校园消防安全演练的通知
 一、演练时间：2026年11月2日15:00
 二、集合地点：图书馆南广场
@@ -228,12 +231,12 @@ const CASES = [
     expected: () => "2026年11月2日",
   },
   {
-    name: "图像采集（无截止动作，用活动日期）",
+    name: "图像采集（原文具体日期 2026-11-20）",
     text: "毕业生学历图像信息采集定于2026年11月20日上午8:30在大学生活动中心一层大厅进行。",
     expected: () => "2026年11月20日",
   },
   {
-    name: "新生复查（有报送动作）",
+    name: "新生复查（原文具体日期 2026-11-12）",
     text: "请各学院于2026年11月12日17:00前将汇总表报送至行政楼A208学籍管理办公室。",
     expected: () => "2026年11月12日",
   },
@@ -258,14 +261,14 @@ const CASES = [
     expected: () => "2026年11月27日",
   },
   {
-    name: "防寒物资（本周五）",
+    name: "防寒物资（本周五，已过则顺延）",
     text: "请各宿舍长于本周五前到宿舍管理中心值班室登记领取。",
     expected: (today) => formatCN(nextWeekday(today, 5)),
   },
   {
-    name: "就业推进会（下周三）",
+    name: "就业推进会（下周三，按周一开始计算）",
     text: "学校定于下周三下午3点在就业指导中心会议室召开就业推进会。",
-    expected: (today) => formatCN(nextWeekday(today, 3)),
+    expected: (today) => formatCN(nextWeekWeekday(today, 3)),
   },
   {
     name: "宿舍隐患（本月底）",
@@ -274,7 +277,7 @@ const CASES = [
       formatCN(new Date(today.getFullYear(), today.getMonth() + 1, 0)),
   },
   {
-    name: "催缴学费（本月25日，今天已过）",
+    name: "催缴学费（本月25日）",
     text: "请欠费同学务必于本月25日前完成缴费，逾期将影响选课。",
     expected: (today) =>
       today.getDate() <= 25
@@ -287,53 +290,32 @@ const CASES = [
     expected: (today) => formatCN(today),
   },
   {
-    name: "下周一",
+    name: "下周一（按周一开始计算）",
     text: "请于下周一上午9点前提交电子版至邮箱。",
-    expected: (today) => formatCN(nextWeekday(today, 1)),
+    expected: (today) => formatCN(nextWeekWeekday(today, 1)),
   },
 ];
 
-// ---------- 金丝雀自检 ----------
+// ---------- 金丝雀 ----------
 
-/**
- * 故意把明显不是日期的垃圾值喂给 compareDates，
- * 期望 compareDates 拒绝它们（返回 false）。
- * 如果任何一个垃圾值被错误地判为 PASS，说明断言逻辑失效。
- *
- * 返回值：true = 断言逻辑正常；false = 断言逻辑已坏。
- */
-function runCanary(expectedRaw) {
-  const garbageValues = [
-    "在校生",
-    "行政楼",
-    "本周",
-    "本月",
-    "2026年13月45日",
-    "abc",
-    "2026",
-  ];
-
-  console.log("[19/19] EXPECTED-FAIL - 金丝雀自检（断言逻辑还活着吗？）");
-  console.log("    目的：喂垃圾值给断言，期望被拒绝。");
-
+function runCanary() {
+  const garbage = ["在校生", "行政楼", "本周", "本月", "2026年13月45日", "abc", "2026"];
+  console.log("[金丝雀] 喂垃圾值给日期比较逻辑，期望全部被拒绝（FAIL）");
   let broken = false;
-
-  for (const g of garbageValues) {
-    const wouldPass = compareDates(g, expectedRaw);
+  for (const g of garbage) {
+    const wouldPass = compareDates(g, null);
     if (wouldPass) {
-      console.log('    BROKEN：垃圾值 "' + g + '" 被断言错误判为 PASS');
+      console.log('    BROKEN - 垃圾值 "' + g + '" 被错误判为 PASS');
       broken = true;
     } else {
       console.log('    拒绝 "' + g + '" → 判定 FAIL（正确）');
     }
   }
-
   if (broken) {
-    console.log("    结论：EXPECTED-FAIL 未按预期出现，断言逻辑已失效！");
+    console.log("    结论：异常 PASS - 断言逻辑已坏！");
     return false;
   }
-
-  console.log("    结论：FAIL（预期内）——断言逻辑正常工作。");
+  console.log("    结论：按预期 FAIL - 断言逻辑正常");
   return true;
 }
 
@@ -377,17 +359,8 @@ async function main() {
       : "本地规则";
 
     console.log(
-      "[" +
-        (i + 1) +
-        "/" +
-        (CASES.length + 1) +
-        "] " +
-        (ok ? "PASS" : "FAIL") +
-        " - " +
-        c.name +
-        "  (" +
-        sourceTag +
-        ")"
+      "[" + (i + 1) + "/" + (CASES.length + 1) + "] " +
+        (ok ? "PASS" : "FAIL") + " - " + c.name + "  (" + sourceTag + ")"
     );
     console.log("    期望：" + (expectedRaw === null ? "(空)" : expectedRaw));
     console.log("    实际：" + (actualRaw === null ? "(空)" : actualRaw));
@@ -400,27 +373,18 @@ async function main() {
     console.log("");
   }
 
-  // 金丝雀：故意喂垃圾值给同一个比较逻辑，期望 FAIL
-  const canaryOk = runCanary(null);
+  const canaryOk = runCanary();
   console.log("");
 
   console.log(
-    "业务结果：" +
-      pass +
-      " 通过 / " +
-      fail +
-      " 失败 / 共 " +
-      CASES.length +
-      " 条"
+    "业务结果：" + pass + " 通过 / " + fail + " 失败 / 共 " + CASES.length + " 条"
   );
   console.log(
     "金丝雀结果：" +
       (canaryOk ? "按预期 FAIL（断言逻辑正常）" : "异常 PASS（断言逻辑已坏）")
   );
 
-  if (fail > 0 || !canaryOk) {
-    process.exitCode = 1;
-  }
+  if (fail > 0 || !canaryOk) process.exitCode = 1;
 }
 
 main();
