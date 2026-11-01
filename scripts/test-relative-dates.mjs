@@ -15,16 +15,7 @@
  *     X个月内/X个月后/过X个月、X年内/X年后/过X年
  *   - 跨月、跨年、闰年、月底
  *   - 含糊说法返回 null，不猜
- *   - 金丝雀：把“一个月后”当成“加 30 天”的坏实现，断言必须拒绝
- *
- * 【金丝雀为什么用“一个月后”而不是“这个星期三”】
- * 之前用“这个星期三”，在周日这天出了个岔子：本周三已过时，
- * 正确实现会把“这个星期三”顺延到下周（11-04），而“总是算下周三”
- * 的坏实现算出来也是 11-04，两者恰好相同——金丝雀当场失灵。
- * 换“一个月后”：加 1 自然月 vs 加 30 天，这个差别在任何一天
- * 都存在（1月15日：正确 2-15，坏实现 2-14），不依赖星期几，稳定可靠。
- * 教训：金丝雀本身要选“正确和错误必定不同”的例子，
- * 否则日历巧合会让它误报“断言正常”。
+ *   - 多金丝雀：每个金丝雀跑多个基准日，全部都必须抓到错误才算通过
  */
 
 import { resolveRelativeDate } from "../app/lib/relativeDate.js";
@@ -36,6 +27,17 @@ function eq(a, b) {
 
 function d(y, m, day) {
   return new Date(y, m - 1, day);
+}
+
+function fmt(date) {
+  return (
+    date.getFullYear() +
+    "年" +
+    (date.getMonth() + 1) +
+    "月" +
+    date.getDate() +
+    "日"
+  );
 }
 
 function resolveOrNull(text, now) {
@@ -68,9 +70,9 @@ const CASES = [
   { name: "即日（2026-11-01）= 11月1日", actual: () => resolveOrNull("即日", NOW_SUNDAY), expected: "2026年11月1日" },
 
   // --- 周几：裸周X ---
-  { name: "今天周日，周三 = 11月4日（本周已过顺延）", actual: () => resolveOrNull("周三", NOW_SUNDAY), expected: "2026年11月4日" },
+  { name: "今天周日，周三 = 11月4日", actual: () => resolveOrNull("周三", NOW_SUNDAY), expected: "2026年11月4日" },
   { name: "今天周日，星期三 = 11月4日", actual: () => resolveOrNull("星期三", NOW_SUNDAY), expected: "2026年11月4日" },
-  { name: "今天周日，周日 = 今天 11月1日", actual: () => resolveOrNull("周日", NOW_SUNDAY), expected: "2026年11月1日" },
+  { name: "今天周日，周日 = 今天", actual: () => resolveOrNull("周日", NOW_SUNDAY), expected: "2026年11月1日" },
   { name: "今天周一，周三 = 11月4日", actual: () => resolveOrNull("周三", NOW_MONDAY), expected: "2026年11月4日" },
   { name: "今天周三，周三 = 今天", actual: () => resolveOrNull("周三", NOW_WEDNESDAY), expected: "2026年11月4日" },
 
@@ -161,7 +163,7 @@ const CASES = [
 
   // --- X周内 / X周后 ---
   { name: "一周内（2026-11-01）= 11月8日", actual: () => resolveOrNull("一周内", NOW_SUNDAY), expected: "2026年11月8日" },
-  { name: "一周后（2026-11-01）= 11月8日（7 个自然日）", actual: () => resolveOrNull("一周后", NOW_SUNDAY), expected: "2026年11月8日" },
+  { name: "一周后（2026-11-01）= 11月8日", actual: () => resolveOrNull("一周后", NOW_SUNDAY), expected: "2026年11月8日" },
   { name: "两周后（2026-11-01）= 11月15日", actual: () => resolveOrNull("两周后", NOW_SUNDAY), expected: "2026年11月15日" },
   { name: "三周内（2026-11-01）= 11月22日", actual: () => resolveOrNull("三周内", NOW_SUNDAY), expected: "2026年11月22日" },
   { name: "一个星期后（2026-11-01）= 11月8日", actual: () => resolveOrNull("一个星期后", NOW_SUNDAY), expected: "2026年11月8日" },
@@ -177,8 +179,8 @@ const CASES = [
   { name: "过三个月（2026-11-01）= 2027年2月1日", actual: () => resolveOrNull("过三个月", NOW_SUNDAY), expected: "2027年2月1日" },
 
   // --- 月份月末处理 ---
-  { name: "月末：2026-01-31 一个月后 = 2月28日（平年）", actual: () => resolveOrNull("一个月后", NOW_JAN31), expected: "2026年2月28日" },
-  { name: "月末闰年：2024-01-31 一个月后 = 2月29日（闰年）", actual: () => resolveOrNull("一个月后", d(2024, 1, 31)), expected: "2024年2月29日" },
+  { name: "月末：2026-01-31 一个月后 = 2月28日", actual: () => resolveOrNull("一个月后", NOW_JAN31), expected: "2026年2月28日" },
+  { name: "月末闰年：2024-01-31 一个月后 = 2月29日", actual: () => resolveOrNull("一个月后", d(2024, 1, 31)), expected: "2024年2月29日" },
   { name: "月末：2026-03-31 一个月后 = 4月30日", actual: () => resolveOrNull("一个月后", NOW_MAR31), expected: "2026年4月30日" },
   { name: "月末：2026-01-15 一个月后 = 2月15日", actual: () => resolveOrNull("一个月后", NOW_JAN15), expected: "2026年2月15日" },
 
@@ -233,83 +235,188 @@ const CASES = [
   { name: "空字符串 = null", actual: () => resolveOrNull("", NOW_SUNDAY), expected: null },
 
   // --- extractNotice + resolveRelativeDate 组合 ---
-  { name: "组合：原文「这个星期三前交」本地抽出「这个星期三」并换算", actual: () => {
+  { name: "组合：原文「这个星期三前交」", actual: () => {
       const rule = extractNotice("请于这个星期三前将材料交至A101。");
       const r = resolveRelativeDate(rule.deadline, NOW_SUNDAY);
       return r ? r.normalized : null;
     }, expected: "2026年11月4日" },
-  { name: "组合：原文「下个星期三前交」本地抽出「下个星期三」并换算", actual: () => {
+  { name: "组合：原文「下个星期三前交」", actual: () => {
       const rule = extractNotice("请于下个星期三前将材料交至A101。");
       const r = resolveRelativeDate(rule.deadline, NOW_SUNDAY);
       return r ? r.normalized : null;
     }, expected: "2026年11月4日" },
-  { name: "组合：原文「下下周三交」本地抽出「下下周三」并换算", actual: () => {
+  { name: "组合：原文「下下周三交」", actual: () => {
       const rule = extractNotice("请于下下周三前将材料交至A101。");
       const r = resolveRelativeDate(rule.deadline, NOW_SUNDAY);
       return r ? r.normalized : null;
     }, expected: "2026年11月11日" },
-  { name: "组合：原文「过三天交」本地抽出「过三天」并换算", actual: () => {
+  { name: "组合：原文「过三天交」", actual: () => {
       const rule = extractNotice("请过三天把表交到教务处A101。");
       const r = resolveRelativeDate(rule.deadline, NOW_SUNDAY);
       return r ? r.normalized : null;
     }, expected: "2026年11月4日" },
-  { name: "组合：原文「过一周报送」本地抽出「过一周」并换算", actual: () => {
+  { name: "组合：原文「过一周报送」", actual: () => {
       const rule = extractNotice("材料请过一周报送至教务处A101。");
       const r = resolveRelativeDate(rule.deadline, NOW_SUNDAY);
       return r ? r.normalized : null;
     }, expected: "2026年11月8日" },
-  { name: "组合：原文「一个月内提交」本地抽出「一个月内」并换算", actual: () => {
+  { name: "组合：原文「一个月内提交」", actual: () => {
       const rule = extractNotice("请于一个月内提交材料至教务处A101。");
       const r = resolveRelativeDate(rule.deadline, NOW_SUNDAY);
       return r ? r.normalized : null;
     }, expected: "2026年12月1日" },
 ];
 
-// ---------- 金丝雀 ----------
+// ---------- 多金丝雀 ----------
 
 /**
- * 【金丝雀的意义】
- * 故意用一个“错的做法”喂进比较逻辑，期望被拒。如果连这个都能通过，
- * 说明断言本身失效——业务用例的 PASS 就全都不可信。
+ * 【金丝雀设计原则】
+ * 每个金丝雀都是“一个已知错误的实现”，跑在多个基准日下。
+ * 要求：在**所有**基准日下，错误实现的输出都必须和正确实现不同。
+ * 这样金丝雀本身才稳定——不会因为某天日历巧合让错误实现撞上正确答案。
  *
- * 【为什么不用“这个星期三”做金丝雀】
- * 之前用“这个星期三”出过事故：周日当天，本周三已过，
- * 正确实现会顺延到下周（11-04），而“总是算下周三”的坏实现
- * 从周日推 3 天也算出 11-04，两个结果撞在一起，金丝雀当场失灵。
- * 这类“日历巧合”让金丝雀本身变成了可错的，不能再用。
+ * 【为什么不给每个金丝雀只挑一个基准日】
+ * 上一轮教训：“这个星期三 = 下周三”这个错误实现在周四到周日抓不到，
+ * 因为这几天本周三已过，正确实现顺延到下周，和“当成下周三”结果撞。
+ * 多基准日能立刻发现这种“某天突然失灵”的情况。
  *
- * 【这次用“一个月后”】
- * 正确：加 1 自然月。在 2026-01-15 = 2 月 15 日。
- * 坏实现：加 30 天 = 2 月 14 日（1 月有 31 天，15 + 30 = 45，45 - 31 = 14）。
- * 差 1 天，不依赖星期几，无论哪一天跑都稳定抓住。
+ * 【为什么不只用一个金丝雀】
+ * 一个金丝雀只能覆盖它针对的那一块逻辑。周几有 weeksAhead 0/1/2 三档，
+ * 自然月有 monthOffset 0/1 两档，用单一金丝雀覆盖不过来。
+ * 用 4 个金丝雀分别盯着：自然月、本周系列、下周系列、下下周系列。
  */
-function brokenAddOneMonthAs30Days(now) {
-  const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 30);
-  return (
-    d.getFullYear() + "年" + (d.getMonth() + 1) + "月" + d.getDate() + "日"
-  );
-}
+const CANARIES = [
+  {
+    name: "一个月后 ≠ 加 30 天（管 X 个月后）",
+    baselines: [
+      { label: "2026-01-15", date: NOW_JAN15 },
+      { label: "2026-01-31", date: NOW_JAN31 },
+      { label: "2026-02-28", date: NOW_FEB28 },
+      { label: "2025-12-31", date: NOW_DEC31 },
+    ],
+    correct: (b) => resolveOrNull("一个月后", b),
+    broken: (b) => {
+      const x = new Date(b.getFullYear(), b.getMonth(), b.getDate() + 30);
+      return fmt(x);
+    },
+  },
+  {
+    name: "这个星期三 ≠ 加 7 天（管 本周/这个/这周 系列）",
+    baselines: [
+      { label: "2026-11-01(周日)", date: NOW_SUNDAY },
+      { label: "2026-11-02(周一)", date: NOW_MONDAY },
+      { label: "2026-11-04(周三)", date: NOW_WEDNESDAY },
+      { label: "2026-11-07(周六)", date: NOW_SATURDAY },
+    ],
+    correct: (b) => resolveOrNull("这个星期三", b),
+    broken: (b) => {
+      const x = new Date(b.getFullYear(), b.getMonth(), b.getDate() + 7);
+      return fmt(x);
+    },
+  },
+  {
+    name: "下个星期三 ≠ 下下周三（管 下周/下个/下一个 系列，多算一周）",
+    baselines: [
+      { label: "2026-11-01(周日)", date: NOW_SUNDAY },
+      { label: "2026-11-02(周一)", date: NOW_MONDAY },
+      { label: "2026-11-04(周三)", date: NOW_WEDNESDAY },
+      { label: "2026-11-07(周六)", date: NOW_SATURDAY },
+    ],
+    correct: (b) => resolveOrNull("下个星期三", b),
+    broken: (b) => {
+      const mondayBased = (b.getDay() + 6) % 7;
+      const targetMondayBased = (3 + 6) % 7;
+      const offset = 14 - mondayBased + targetMondayBased;
+      const x = new Date(b.getFullYear(), b.getMonth(), b.getDate() + offset);
+      return fmt(x);
+    },
+  },
+  {
+    name: "下下周三 ≠ 下周三（管 下下周/下下个 系列，少算一周）",
+    baselines: [
+      { label: "2026-11-01(周日)", date: NOW_SUNDAY },
+      { label: "2026-11-02(周一)", date: NOW_MONDAY },
+      { label: "2026-11-04(周三)", date: NOW_WEDNESDAY },
+      { label: "2026-11-07(周六)", date: NOW_SATURDAY },
+    ],
+    correct: (b) => resolveOrNull("下下周三", b),
+    broken: (b) => {
+      const mondayBased = (b.getDay() + 6) % 7;
+      const targetMondayBased = (3 + 6) % 7;
+      const offset = 7 - mondayBased + targetMondayBased;
+      const x = new Date(b.getFullYear(), b.getMonth(), b.getDate() + offset);
+      return fmt(x);
+    },
+  },
+];
 
-function runCanary() {
-  const now = NOW_JAN15; // 2026-01-15，周四
-  const correct = resolveOrNull("一个月后", now);
-  const expected = "2026年2月15日";
-  const broken = brokenAddOneMonthAs30Days(now);
+function runCanaries() {
+  console.log("");
+  console.log("========== 金丝雀自检 ==========");
+  console.log("每个金丝雀用多个基准日验证，所有基准日都必须抓到错误才算通过。");
+  console.log("任何一个基准日抓不到，或金丝雀整体异常 PASS，都视为断言失效。");
+  console.log("");
 
-  console.log("[金丝雀] 用「一个月后 = 加 30 天」的坏实现，断言必须拒绝");
-  console.log("    正确实现：" + JSON.stringify(correct));
-  console.log("    坏实现：" + JSON.stringify(broken));
-  console.log("    期望：" + JSON.stringify(expected));
+  let allPassed = true;
 
-  const wouldPass = eq(broken, expected);
-  if (wouldPass) {
-    console.log("    BROKEN - 坏实现被错误判为与期望相等");
-    console.log("    结论：异常 PASS - 断言逻辑已坏！");
-    return false;
+  for (const canary of CANARIES) {
+    console.log("[金丝雀] " + canary.name);
+    let captured = 0;
+    let missed = 0;
+
+    for (const baseline of canary.baselines) {
+      const c = canary.correct(baseline.date);
+      const b = canary.broken(baseline.date);
+      if (eq(b, c)) {
+        console.log(
+          "    ✗ 基准 " +
+            baseline.label +
+            "：坏实现 " +
+            JSON.stringify(b) +
+            " 与正确 " +
+            JSON.stringify(c) +
+            " 相同 → 抓不到"
+        );
+        missed++;
+      } else {
+        console.log(
+          "    ✓ 基准 " +
+            baseline.label +
+            "：坏实现 " +
+            JSON.stringify(b) +
+            " ≠ 正确 " +
+            JSON.stringify(c) +
+            " → 抓到"
+        );
+        captured++;
+      }
+    }
+
+    if (missed > 0) {
+      console.log(
+        "    结论：抓不到 " +
+          missed +
+          " 个 / 抓到 " +
+          captured +
+          " 个 → 金丝雀不够硬，需重新挑错误实现"
+      );
+      allPassed = false;
+    } else {
+      console.log("    结论：全部 " + captured + " 个基准日都抓到 → 通过");
+    }
+    console.log("");
   }
-  console.log("    断言判定为 FAIL（正确）");
-  console.log("    结论：按预期 FAIL - 断言逻辑正常");
-  return true;
+
+  if (allPassed) {
+    console.log(
+      "金丝雀总结论：按预期 FAIL（所有金丝雀在所有基准日都能抓到错误，断言逻辑正常）"
+    );
+    return true;
+  }
+  console.log(
+    "金丝雀总结论：异常 PASS（有金丝雀抓不到错误，断言逻辑可能已坏）"
+  );
+  return false;
 }
 
 // ---------- 主流程 ----------
@@ -334,15 +441,16 @@ for (let i = 0; i < CASES.length; i++) {
   console.log("");
 }
 
-const canaryOk = runCanary();
-console.log("");
+const canaryOk = runCanaries();
 
 console.log(
   "业务结果：" + pass + " 通过 / " + fail + " 失败 / 共 " + CASES.length + " 条"
 );
 console.log(
   "金丝雀结果：" +
-    (canaryOk ? "按预期 FAIL（断言逻辑正常）" : "异常 PASS（断言逻辑已坏）")
+    (canaryOk
+      ? "按预期 FAIL（断言逻辑正常）"
+      : "异常 PASS（断言逻辑已坏）")
 );
 
 if (fail > 0 || !canaryOk) {
