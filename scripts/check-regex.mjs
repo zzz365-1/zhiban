@@ -4,13 +4,20 @@
  *
  * 扫描 app/lib/ 下的所有 .js 文件，检查代码部分（跳过注释）
  * 有没有违规的反斜杠转义。
+ *
+ * 用绝对路径定位项目根，无论从哪跑都能找到 app/lib。
  */
 
 import { readFileSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { join, dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { lintRegexCode } from "../app/lib/regexLint.js";
 
-const LIB_DIR = "app/lib";
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const PROJECT_ROOT = resolve(__dirname, "..");
+const LIB_DIR = resolve(PROJECT_ROOT, "app", "lib");
+
 const files = readdirSync(LIB_DIR).filter((f) => f.endsWith(".js"));
 
 let totalIssues = 0;

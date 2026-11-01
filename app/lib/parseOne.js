@@ -1,6 +1,11 @@
 /**
  * 解析单条通知的纯逻辑，不碰 React state。
  *
+ * 【本地优先，模型兜底】
+ * 先走本地规则和本地相对日期换算，本地能搞定就不调 AI。
+ * 只有本地搞不定（deadline 换算失败、location 缺失）才调 AI。
+ * 这样大部分校园通知不花钱，模型只负责它真正擅长的部分。
+ *
  * 日期策略：
  *   1. 本地规则抽出 deadline
  *   2. 如果 deadline 是相对日期，本地尝试换算成具体日期
@@ -9,14 +14,15 @@
  *   5. AI 返回的 deadline 如果仍是相对日期，本地再尝试换算一次
  *   6. AI 不可用时退回 rule_fallback，此时 deadline 已是本地换算结果
  *
+ * 【错误码不吞掉】
+ * AI 调用失败时，把错误码写进 analysis._aiErrorCode，
+ * 供界面区分“超时 / 网络 / 没密钥 / 返回格式异常”等具体原因。
+ * 绝不把错误码吞掉或改成模糊的一句话——用户需要知道栽在哪一步。
+ *
  * 出处核对策略：
  *   AI 结果合并时把原文传进 mergeAIResult，模型返回的每个值
  *   都会回原文核对出处。找不到的值会被去掉，记录在 _groundingDropped。
  *   本地已换算的日期（_locallyResolved）直接放行，不核对。
- *
- * 错误策略：
- *   AI 调用失败时，把错误码写进 analysis._aiErrorCode，
- *   供界面区分“超时 / 网络 / 没密钥 / 返回格式异常”等具体原因。
  *
  * 永不抛异常。
  */
@@ -34,6 +40,7 @@ export async function parseOne(text) {
   const now = new Date();
   const ruleResult = extractNotice(text);
 
+  // 本地优先换算相对日期
   if (ruleResult.deadline && isFuzzyDate(ruleResult.deadline)) {
     const resolved = resolveRelativeDate(ruleResult.deadline, now);
     if (resolved) {
@@ -50,6 +57,7 @@ export async function parseOne(text) {
     const aiResult = await callAIExtract(text);
     const merged = mergeAIResult(ruleResult, aiResult, text);
 
+    // AI 返回的 deadline 如果仍是相对日期，本地再换算一次
     if (merged.deadline && isFuzzyDate(merged.deadline)) {
       const resolved = resolveRelativeDate(merged.deadline, now);
       if (resolved) {

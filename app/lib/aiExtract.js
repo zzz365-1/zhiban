@@ -5,6 +5,7 @@
 import {
   groundStringValue,
   groundDateValue,
+  groundTimeValue,
 } from "./grounding.js";
 
 export const VALID_CATEGORIES = ["教务", "活动", "行政", "后勤", "其他"];
@@ -124,15 +125,12 @@ export function isRuleResultGood(ruleResult) {
  * - title / summary / category：不核对（模型组织出来的）
  * - 本地已换算的 deadline（_locallyResolved）：直接放行
  * - 时间如果跟着 deadline 被拦，一起拦（日期时间同源）
+ * - time 用 groundTimeValue（时间归一化：“下午五点” vs “17:00” 视为相同）
  *
  * 【核对失败的处理】
  * - location / time / materials：清空该值，记入 _groundingDropped
  * - audience：退回本地值（如果有），否则清空并记录
  * - deadline：清空，同时清空 time（日期时间同源）
- *
- * 【sourceText 参数】
- * 生产环境必须传原文。传 undefined 时跳过核对（向后兼容老测试），
- * 但实际调用点（parseOne）必须传 text。
  */
 export function mergeAIResult(ruleResult, aiResult, sourceText) {
   const base = ruleResult || {};
@@ -143,7 +141,7 @@ export function mergeAIResult(ruleResult, aiResult, sourceText) {
   const baseDeadlineIsFuzzy =
     Boolean(base.deadline) && isFuzzyDate(base.deadline);
 
-  // ---- 第一步：字段来源选择（原有逻辑） ----
+  // ---- 第一步：字段来源选择 ----
   let deadline;
   let time;
   let inferred = false;
@@ -197,7 +195,7 @@ export function mergeAIResult(ruleResult, aiResult, sourceText) {
   const positions = {};
   const dropped = [];
 
-  // deadline：本地已换算的直接放行，不核对
+  // deadline
   let finalDeadline = deadline;
   let finalTime = time;
 
@@ -205,9 +203,10 @@ export function mergeAIResult(ruleResult, aiResult, sourceText) {
     const g = groundDateValue(finalDeadline, sourceText);
     if (g.accepted) {
       if (g.position) positions.deadline = g.position;
-      // deadline 通过 → time 单独核对
+
+      // deadline 通过 → time 单独核对（用时间归一化）
       if (finalTime) {
-        const gt = groundStringValue(finalTime, sourceText);
+        const gt = groundTimeValue(finalTime, sourceText);
         if (gt.accepted) {
           if (gt.position) positions.time = gt.position;
         } else {
@@ -249,7 +248,6 @@ export function mergeAIResult(ruleResult, aiResult, sourceText) {
         value: finalLocation,
         reason: g.reason,
       });
-      // 退回本地值（本地值来自原文抽取，通常能找到）
       finalLocation = base.location || null;
       if (finalLocation) {
         const g2 = groundStringValue(finalLocation, sourceText);
@@ -267,7 +265,7 @@ export function mergeAIResult(ruleResult, aiResult, sourceText) {
     }
   }
 
-  // materials：逐个核对
+  // materials
   const finalMaterials = [];
   for (const m of materials) {
     const g = groundStringValue(m, sourceText);
@@ -282,7 +280,7 @@ export function mergeAIResult(ruleResult, aiResult, sourceText) {
     }
   }
 
-  // audience：宽松处理
+  // audience
   let finalAudience = audience;
   if (audience) {
     const g = groundStringValue(audience, sourceText);
