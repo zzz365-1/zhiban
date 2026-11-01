@@ -25,3 +25,6 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 deliverables/recordings/
+
+# local-only personal reflection notes (never pushed)
+docs/journal/self-reflection-local.md
