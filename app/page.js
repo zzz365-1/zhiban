@@ -14,6 +14,7 @@ import { updateNoticeAnalysis } from "./lib/noticeOps.js";
 import { parseOne } from "./lib/parseOne.js";
 import { isDuplicate } from "./lib/splitNotices.js";
 import { checkModeMismatch } from "./lib/modeGuard.js";
+import { buildSampleNotices } from "./lib/sampleNotices.js";
 
 const STORAGE_KEY = "zhiban.notices.v1";
 
@@ -98,7 +99,6 @@ export default function Home() {
     }
   }, [notices, hydrated]);
 
-  // 内容或模式变化后，延迟 300ms 检测是否不匹配
   useEffect(() => {
     setWarningDismissed(false);
 
@@ -224,6 +224,14 @@ export default function Home() {
     setWarningDismissed(false);
   }
 
+  function handleLoadSamples() {
+    const samples = buildSampleNotices(Date.now());
+    setNotices(samples);
+    setSelectedId(null);
+    setNoticeText("");
+    setAnalysis(null);
+  }
+
   function handleModeChange(newMode) {
     setInputMode(newMode);
   }
@@ -238,6 +246,7 @@ export default function Home() {
   }
 
   const leftWidth = activeTab === "calendar" ? "360px" : "260px";
+  const showEmptyState = hydrated && notices.length === 0;
 
   return (
     <div className="flex h-screen flex-col bg-slate-100">
@@ -288,6 +297,8 @@ export default function Home() {
           onSwitchMode={handleSwitchMode}
           onBatchSave={handleBatchSave}
           existingNotices={notices}
+          showEmptyState={showEmptyState}
+          onLoadSamples={handleLoadSamples}
         />
 
         <AnalysisPanel

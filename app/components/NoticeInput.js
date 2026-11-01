@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, useState } from "react";
 import MultiNoticePanel from "./MultiNoticePanel";
 
 const MODES = [
@@ -22,8 +22,11 @@ export default function NoticeInput({
   onSwitchMode,
   onBatchSave,
   existingNotices,
+  showEmptyState,
+  onLoadSamples,
 }) {
   const textareaRef = useRef(null);
+  const [dismissedEmpty, setDismissedEmpty] = useState(false);
 
   useEffect(() => {
     const el = textareaRef.current;
@@ -32,6 +35,9 @@ export default function NoticeInput({
     const max = mode === "multi" ? 180 : 1000;
     el.style.height = Math.min(el.scrollHeight, max) + "px";
   }, [value, mode]);
+
+  const renderEmptyState =
+    mode === "single" && showEmptyState && !dismissedEmpty && !value.trim();
 
   return (
     <section className="flex h-full min-h-0 flex-col bg-slate-50/70 p-5">
@@ -50,20 +56,6 @@ export default function NoticeInput({
             {m.label}
           </button>
         ))}
-      </div>
-
-      <div className="mb-3 flex items-baseline justify-between">
-        <label
-          htmlFor="notice-text"
-          className="text-sm font-semibold text-slate-700"
-        >
-          {mode === "single" ? "通知原文" : "多条通知原文"}
-        </label>
-        <span className="text-xs text-slate-400">
-          {mode === "single"
-            ? "粘贴一条通知"
-            : "用空行或「关于……的通知」标题分隔多条"}
-        </span>
       </div>
 
       {warning && warning.shouldWarn && (
@@ -91,21 +83,72 @@ export default function NoticeInput({
         </div>
       )}
 
-      <textarea
-        ref={textareaRef}
-        id="notice-text"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={
-          mode === "single"
-            ? "把一条通知的原文粘贴到这里……"
-            : "把多条通知的原文粘贴到这里，用空行或「关于……的通知」标题分隔……"
-        }
-        rows={6}
-        className="w-full resize-none overflow-y-auto rounded-xl border border-slate-200 bg-white p-4 text-sm leading-relaxed text-slate-800 shadow-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
-      />
+      {renderEmptyState && (
+        <div className="flex flex-1 flex-col items-center justify-center rounded-xl border border-dashed border-slate-300 bg-white p-8 text-center">
+          <h3 className="text-lg font-semibold text-slate-800">
+            欢迎使用知办
+          </h3>
+          <p className="mt-3 max-w-md text-sm leading-relaxed text-slate-500">
+            知办可以从校园通知里自动提取截止日期、地点和要提交的材料，帮你把散落在群聊、公众号和教务系统里的通知整理成待办清单。
+          </p>
+          <p className="mt-2 max-w-md text-sm leading-relaxed text-slate-500">
+            把一条通知的原文粘贴到下方输入框，点「解析」就能看到结果。也可以先载入几条示例看看效果。
+          </p>
+          <div className="mt-6 flex gap-3">
+            <button
+              type="button"
+              onClick={onLoadSamples}
+              className="rounded-lg bg-blue-600 px-5 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-4 focus:ring-blue-200"
+            >
+              载入示例通知
+            </button>
+            <button
+              type="button"
+              onClick={() => setDismissedEmpty(true)}
+              className="rounded-lg border border-slate-200 bg-white px-5 py-2 text-sm text-slate-600 shadow-sm transition hover:bg-slate-50"
+            >
+              直接粘贴
+            </button>
+          </div>
+          <p className="mt-4 text-xs text-slate-400">
+            示例通知的日期按今天动态生成，不会过期。
+          </p>
+        </div>
+      )}
 
-      {mode === "single" && (
+      {!renderEmptyState && (
+        <>
+          <div className="mb-3 flex items-baseline justify-between">
+            <label
+              htmlFor="notice-text"
+              className="text-sm font-semibold text-slate-700"
+            >
+              {mode === "single" ? "通知原文" : "多条通知原文"}
+            </label>
+            <span className="text-xs text-slate-400">
+              {mode === "single"
+                ? "粘贴一条通知"
+                : "用空行或「关于……的通知」标题分隔多条"}
+            </span>
+          </div>
+
+          <textarea
+            ref={textareaRef}
+            id="notice-text"
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            placeholder={
+              mode === "single"
+                ? "把一条通知的原文粘贴到这里……"
+                : "把多条通知的原文粘贴到这里，用空行或「关于……的通知」标题分隔……"
+            }
+            rows={6}
+            className="w-full resize-none overflow-y-auto rounded-xl border border-slate-200 bg-white p-4 text-sm leading-relaxed text-slate-800 shadow-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+          />
+        </>
+      )}
+
+      {mode === "single" && !renderEmptyState && (
         <>
           <div className="mt-4 flex items-center justify-end gap-3">
             <button
