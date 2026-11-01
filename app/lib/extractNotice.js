@@ -217,7 +217,6 @@ const MATERIAL_WORDS = [
   "选民证", "户口本", "工作证", "团员证", "党费证",
   "黑色笔", "签字笔", "黑色签字笔", "铅笔", "钢笔",
   "作品", "文件", "证明", "证件", "回执", "汇总表", "登记表",
-  // 常见复合材料名
   "身份证复印件", "学生证复印件", "户口本复印件",
   "一寸照片", "二寸照片", "一寸免冠照片", "二寸免冠照片",
   "免冠照片", "证件照",
@@ -241,12 +240,54 @@ const TRAILING_PLACE_RE = new RegExp(
   "[到在至去](?:现场|学校|教室|办公室|会场|门口|大厅|前台|服务台|报到处|签到处|座位|位置)"
 );
 
-// 提示语词：本身不是材料，只是引出清单的说明
 const HINT_WORDS = ["材料", "附件", "文件"];
 const HINT_FOLLOW = ["：", ":", "包括", "如下", "有", "含"];
 
 const RE_PAREN_CN = new RegExp("（[^（）]*）", "g");
 const RE_PAREN_EN = new RegExp("[（(][^()（）]*[）)]", "g");
+
+/**
+ * 引导短语（出现在材料清单最前面、用来引出清单的说明文字）。
+ * 覆盖：
+ *   - [可选动作] + [可选如下/以下] + 材料/附件 + [可选包括/如下/有/含] + 冒号
+ *   - 到/在/至/去 + 某地 + 交/提交/报送/递交 + 材料/附件 + 冒号
+ *   - 单纯动作 + 冒号
+ */
+const HINT_PREFIX_PATTERNS = [
+  new RegExp(
+    "^(?:需带|需提交|需交|需提供|需附|请交|请提交|请携带|请带|提交|上交|递交|报送|携带|自备)?" +
+    "(?:如下|以下|下面|下列)?" +
+    "(?:材料|附件)" +
+    "(?:如下|包括|有|含)?" +
+    "[：:]"
+  ),
+  new RegExp(
+    "^[到在至去][^，。；;：:]{1,15}?" +
+    "(?:交|提交|报送|递交)" +
+    "(?:如下|以下|下面|下列)?" +
+    "(?:材料|附件)" +
+    "(?:如下|包括|有|含)?" +
+    "[：:]"
+  ),
+  new RegExp(
+    "^(?:携带|自备|需带|须带|请带|另带|提交|上交|递交|报送|交|提供|附上)[：:]"
+  ),
+];
+
+/**
+ * 去掉开头的引导短语。最多循环 3 次处理嵌套。
+ */
+function stripLeadingHints(text) {
+  let t = String(text || "").trim();
+  for (let i = 0; i < 3; i++) {
+    const before = t;
+    for (const re of HINT_PREFIX_PATTERNS) {
+      t = t.replace(re, "").trim();
+    }
+    if (t === before) break;
+  }
+  return t;
+}
 
 function stripParentheses(text) {
   let result = String(text || "");
@@ -271,34 +312,43 @@ function cleanMaterialItem(s) {
   let t = String(s || "").trim();
   if (!t) return null;
 
+  // 1. 去开头引导短语（材料：、需带材料如下：、到办公室交材料：…）
+  t = stripLeadingHints(t);
+  if (!t) return null;
+
+  // 2. 去首尾标点
   t = trimPunctuation(t);
 
-  // 数量词：数字 + 量词，量词必须存在。
-  // “一寸照片”的“寸”不是量词，整条不匹配，保留原样。
+  // 3. 去开头的“数字 + 量词”（一支 / 三份 / 1张）。量词必须存在，
+  //    “一寸照片”的“寸”不是量词，整条不匹配，保留原样。
   t = t.replace(
     new RegExp("^[" + NUMBER_CHARS + "]+[" + QUANTIFIER_CHARS + "]"),
     ""
   );
 
+  // 4. 去尾部“等”
   t = t.replace(new RegExp("等$"), "");
   t = trimPunctuation(t.trim());
 
-  // 截断尾部“到现场/在学校/至办公室”这类地点介词短语
+  // 5. 截断尾部地点介词短语（到现场 / 在学校 / 至办公室）
   const placeMatch = t.match(TRAILING_PLACE_RE);
   if (placeMatch && placeMatch.index > 0) {
     t = t.slice(0, placeMatch.index).trim();
     t = trimPunctuation(t);
   }
 
+  // 6. 去尾部数量词（两张 / 三份 / 1本 / 一件）
+  t = t.replace(
+    new RegExp("[" + NUMBER_CHARS + "]+[" + QUANTIFIER_CHARS + "]$"),
+    ""
+  );
+  t = trimPunctuation(t);
+
   if (t.length < 1 || t.length > 20) return null;
   if (LEADING_STOP_RE.test(t)) return null;
   return t;
 }
 
-/**
- * 判断某个词在当前位置是否是提示语（不是材料本身）。
- * 例：“需提交材料：”里的“材料”后面紧跟冒号，是提示语。
- */
 function isHintWordAt(text, word, idx) {
   if (!HINT_WORDS.includes(word)) return false;
   const after = text.slice(idx + word.length, idx + word.length + 4);
@@ -336,11 +386,6 @@ function collectMaterialCandidates(text) {
   return candidates;
 }
 
-/**
- * 合并首尾相接的候选。
- * “身份证”[8,11] + “复印件”[11,14] → “身份证复印件”[8,14]。
- * 只在两个候选 end === start 时合并，中间有标点不会合并。
- */
 function mergeAdjacentCandidates(candidates) {
   let list = [...candidates];
   let changed = true;
@@ -369,13 +414,6 @@ function mergeAdjacentCandidates(candidates) {
   return list;
 }
 
-/**
- * 位置感知去重：
- *   - 按长度降序处理
- *   - 候选的这次出现如果完全落在已保留的更长候选区间内，跳过
- *   - 至少有一次出现未被覆盖的词才保留
- *   - 保留的词按首次出现位置排序
- */
 function dedupeCandidates(candidates) {
   const sorted = [...candidates].sort(
     (a, b) => b.end - b.start - (a.end - a.start)
@@ -385,7 +423,6 @@ function dedupeCandidates(candidates) {
 
   for (const c of sorted) {
     if (c.start < 0 || c.end < 0) {
-      // 无法定位的候选单独保留
       if (!keptWords.includes(c.word)) keptWords.push(c.word);
       continue;
     }
@@ -437,10 +474,8 @@ function extractMaterials(text) {
   const noParens = stripParentheses(text);
   let candidates = [];
 
-  // 1. 白名单扫描（去括号文本上）
   candidates = candidates.concat(collectMaterialCandidates(noParens));
 
-  // 2. 携带清单：原文抽取，去括号文本定位
   const carryItems = extractCarryItems(text);
   for (const item of carryItems) {
     let idx = noParens.indexOf(item);
@@ -454,7 +489,6 @@ function extractMaterials(text) {
     }
   }
 
-  // 3. 列举式：去括号文本定位
   const listMatch = text.match(
     new RegExp(
       "(?:材料|附件)[ ]*(?:包括|如下|有|含|：|:)[ ]*([^" + LF + "。；;]{1,80})"
@@ -479,7 +513,6 @@ function extractMaterials(text) {
     }
   }
 
-  // 4. 合并首尾相接的候选，再位置感知去重
   const merged = mergeAdjacentCandidates(candidates);
   return dedupeCandidates(merged);
 }
