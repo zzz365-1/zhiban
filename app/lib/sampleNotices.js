@@ -5,12 +5,13 @@
  * 不走真实解析流程，直接构造好 analysis 和 deadlineDate，
  * 保证载入后立刻能看到效果，不调用 AI、不花钱。
  *
- * 5 条覆盖：
- *   1. 明天截止，含两个日期（靠前截止 / 靠后活动），有材料有地点
- *   2. 三天后截止，有地点无材料
+ * 6 条覆盖：
+ *   1. 明天截止，含两个日期（靠前截止 / 靠后活动），有材料有地点，红色
+ *   2. 三天后截止，有地点无材料，红色，会出现在待办
  *   3. 「下周三」相对日期，deadlineDate 为 null，可演示手动修改
  *   4. 活动通知，无日期，deadlineDate 为 null
- *   5. 两天前截止，已过期，显示为灰色
+ *   5. 两天前截止，已过期，灰色
+ *   6. 五天后截止，有材料有地点，黄色
  */
 
 const LF = String.fromCharCode(10);
@@ -50,7 +51,7 @@ function formatDateFull(date) {
 
 /**
  * @param {number|Date} now 基准时间
- * @returns {Array} 5 条完整 notice 对象
+ * @returns {Array} 6 条完整 notice 对象
  */
 export function buildSampleNotices(now) {
   const base = now instanceof Date ? new Date(now.getTime()) : new Date(now);
@@ -58,15 +59,18 @@ export function buildSampleNotices(now) {
   const tomorrow = addDays(base, 1);
   const dayAfter = addDays(base, 2);
   const threeDays = addDays(base, 3);
+  const fiveDays = addDays(base, 5);
   const twoDaysAgo = addDays(base, -2);
 
   const tomorrowCN = formatDateCN(tomorrow);
   const dayAfterCN = formatDateCN(dayAfter);
   const threeDaysCN = formatDateCN(threeDays);
+  const fiveDaysCN = formatDateCN(fiveDays);
   const twoDaysAgoCN = formatDateCN(twoDaysAgo);
 
   const tomorrowFull = formatDateFull(tomorrow);
   const threeDaysFull = formatDateFull(threeDays);
+  const fiveDaysFull = formatDateFull(fiveDays);
   const twoDaysAgoFull = formatDateFull(twoDaysAgo);
 
   const savedAt = base.getTime();
@@ -204,9 +208,40 @@ export function buildSampleNotices(now) {
     savedAt,
   };
 
-  return [n1, n2, n3, n4, n5];
+  const n6 = {
+    id: "sample_6",
+    title: "关于开展期中教学检查的通知",
+    source: "示例",
+    text:
+      "关于开展期中教学检查的通知" +
+      LF +
+      "各学院：" +
+      LF +
+      "教务处将于近期开展期中教学检查。请各学院于" +
+      fiveDaysCN +
+      "下午2点前将《期中教学检查自查表》和本学期课程教学进度表报送至教务处B201办公室。",
+    analysis: {
+      deadline: fiveDaysFull,
+      time: "14:00",
+      location: "教务处B201办公室",
+      materials: ["期中教学检查自查表", "课程教学进度表"],
+      audience: "各学院",
+      title: null,
+      summary: "各学院于" + fiveDaysCN + "14:00前报送期中教学检查材料",
+      category: "教务",
+      _source: "rule",
+    },
+    deadlineDate: atTime(fiveDays, 14, 0).getTime(),
+    savedAt,
+  };
+
+  return [n1, n2, n3, n4, n5, n6];
 }
 
+/**
+ * 示例条数。从实际数组长度动态计算，不写死，
+ * 以后增删示例不会和这个数对不上。
+ */
 export function getSampleCount() {
-  return 5;
+  return buildSampleNotices(Date.now()).length;
 }
