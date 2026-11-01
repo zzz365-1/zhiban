@@ -28,6 +28,9 @@ const FUZZY_DATE_PATTERNS = [
   new RegExp("^(本月|下月)?(底|初|末)$"),
   new RegExp("^[0-9]{1,2}月(底|初|末)$"),
   new RegExp("^(本月|下月)[0-9]{1,2}[日号]$"),
+  new RegExp(
+    "^(?:过)?[0-9一二三四五六七八九十两]+(?:天|日|周|个?星期)(?:之内|以内|内|之后|以后|后)$"
+  ),
 ];
 
 export function isFuzzyDate(s) {
@@ -47,18 +50,6 @@ export function isRuleResultGood(ruleResult) {
   return true;
 }
 
-/**
- * 合并 AI 结果。
- *
- * deadline/time 策略：
- *   - 本地已通过相对日期换算确定了具体日期（_locallyResolved）→ 用本地的
- *   - 否则 AI 给了 deadline → 用 AI 的（AI 只负责“选哪个日期”，不负责换算）
- *   - 否则本地是模糊日期 → 留空
- *   - 否则用本地的
- *
- * location / audience：AI 优先，本地兜底。
- * materials：整套用一边，绝不拼接。
- */
 export function mergeAIResult(ruleResult, aiResult) {
   const base = ruleResult || {};
   const baseDeadlineIsResolved =

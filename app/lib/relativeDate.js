@@ -9,11 +9,47 @@
  *   - 本周X / 这周X / 本星期X / 这星期X（已过则顺延到下周）
  *   - 本月底 / 本月末 / 本月初 / 下月底 / 下月末 / 下月初
  *   - 本月X日 / 下月X日 / 本月X号 / 下月X号
+ *   - X天内 / X天后 / X日内 / X日后 / 过X天（中文数字一到九十九）
+ *   - X周内 / X周后 / X个星期内 / X个星期后
  *
  * 算不出来的返回 null，绝不猜测。
+ * “一周后”按 7 个自然日计算，不是 5 个工作日。
  */
 
 const DAY_MAP = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 日: 0, 天: 0 };
+
+const CN_DIGITS = {
+  一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5,
+  六: 6, 七: 7, 八: 8, 九: 9,
+};
+
+/**
+ * 解析中文数字（一到九十九）或纯阿拉伯数字。
+ * 无法解析返回 null。
+ */
+function parseChineseNumber(s) {
+  if (!s) return null;
+  const str = String(s).trim();
+
+  if (new RegExp("^[0-9]+$").test(str)) {
+    return parseInt(str, 10);
+  }
+
+  if (str === "十") return 10;
+
+  const m1 = str.match(new RegExp("^十([一二三四五六七八九])$"));
+  if (m1) return 10 + CN_DIGITS[m1[1]];
+
+  const m2 = str.match(new RegExp("^([一二三四五六七八九])十$"));
+  if (m2) return CN_DIGITS[m2[1]] * 10;
+
+  const m3 = str.match(new RegExp("^([一二三四五六七八九])十([一二三四五六七八九])$"));
+  if (m3) return CN_DIGITS[m3[1]] * 10 + CN_DIGITS[m3[2]];
+
+  if (str.length === 1 && str in CN_DIGITS) return CN_DIGITS[str];
+
+  return null;
+}
 
 function addDays(base, n) {
   return new Date(base.getFullYear(), base.getMonth(), base.getDate() + n);
@@ -31,7 +67,7 @@ function formatCN(date) {
 }
 
 /**
- * @param {string} text 相对日期文本，如“明天”“下周三”“本月底”
+ * @param {string} text 相对日期文本
  * @param {Date} now 基准时间
  * @returns {{ date: Date, normalized: string } | null}
  */
@@ -49,19 +85,17 @@ export function resolveRelativeDate(text, now = new Date()) {
   }
 
   // 下周X / 本周X / 这周X
-  const m1 = s.match(/^(下|本|这)?(?:周|星期)([一二三四五六日天])$/);
+  const m1 = s.match(new RegExp("^(下|本|这)?(?:周|星期)([一二三四五六日天])$"));
   if (m1) {
     const prefix = m1[1] || "本";
     const target = DAY_MAP[m1[2]];
-    const mondayBased = (base.getDay() + 6) % 7; // 0=周一 ... 6=周日
+    const mondayBased = (base.getDay() + 6) % 7;
     const targetMondayBased = (target + 6) % 7;
 
     let offset;
     if (prefix === "下") {
-      // 下一周：从下周一算起
       offset = 7 - mondayBased + targetMondayBased;
     } else {
-      // 本周：本周内的对应星期几；已过则顺延到下周
       offset = -mondayBased + targetMondayBased;
       if (offset < 0) offset += 7;
     }
@@ -95,7 +129,7 @@ export function resolveRelativeDate(text, now = new Date()) {
   }
 
   // 本月X日 / 下月X日
-  const m2 = s.match(/^(本月|下月)([0-9]{1,2})[日号]?$/);
+  const m2 = s.match(new RegExp("^(本月|下月)([0-9]{1,2})[日号]?$"));
   if (m2) {
     const monthOffset = m2[1] === "本月" ? 0 : 1;
     const day = parseInt(m2[2], 10);
@@ -103,13 +137,15 @@ export function resolveRelativeDate(text, now = new Date()) {
     const year = base.getFullYear() + Math.floor(rawMonth / 12);
     const month = ((rawMonth % 12) + 12) % 12;
 
-    // 检查日期合法（2月30日会溢出到3月，必须拒绝）
     const d = new Date(year, month, day);
-    if (d.getFullYear() !== year || d.getMonth() !== month || d.getDate() !== day) {
+    if (
+      d.getFullYear() !== year ||
+      d.getMonth() !== month ||
+      d.getDate() !== day
+    ) {
       return null;
     }
 
-    // 本月的日期如果已过，返回 null（不猜是否顺延）
     if (monthOffset === 0) {
       const todayMidnight = new Date(
         base.getFullYear(),
@@ -122,11 +158,37 @@ export function resolveRelativeDate(text, now = new Date()) {
     return { date: d, normalized: formatCN(d) };
   }
 
+  // X天内 / X天后 / X日内 / X日后 / 过X天
+  const m3 = s.match(
+    new RegExp("^(过)?([0-9一二三四五六七八九十两]+)(?:天|日)(?:之内|以内|内|之后|以后|后)$")
+  );
+  if (m3) {
+    const n = parseChineseNumber(m3[2]);
+    if (n !== null && n > 0 && n <= 365) {
+      const d = addDays(base, n);
+      return { date: d, normalized: formatCN(d) };
+    }
+    return null;
+  }
+
+  // X周内 / X周后 / X个星期内 / X个星期后
+  const m4 = s.match(
+    new RegExp("^([0-9一二三四五六七八九十两]+)(?:周|个?星期)(?:之内|以内|内|之后|以后|后)$")
+  );
+  if (m4) {
+    const n = parseChineseNumber(m4[1]);
+    if (n !== null && n > 0 && n <= 52) {
+      const d = addDays(base, n * 7);
+      return { date: d, normalized: formatCN(d) };
+    }
+    return null;
+  }
+
   return null;
 }
 
 /**
- * 判断一个相对日期文本能否被本地换算。
+ * 判断一个相对日期文本能否被本地换算（用当前时间）。
  */
 export function isResolvableRelativeDate(text) {
   return resolveRelativeDate(text, new Date()) !== null;

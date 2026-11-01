@@ -16,6 +16,10 @@ const DATE_SOURCES = [
   { source: "(?:大后天|后天|明天|今天)", flags: "g" },
   { source: "(?:本月|下月)[0-9]{1,2}[ ]*[日号]", flags: "g" },
   { source: "(?:[0-9]{1,2}[ ]*月[底初末]|本月[底初末]|下月[底初末])", flags: "g" },
+  // X天内 / X天后 / X日之内 / X日以后（必须带后缀，避免误匹配“三天”）
+  { source: "([0-9一二三四五六七八九十两]+)(?:天|日)(?:之内|以内|内|之后|以后|后)", flags: "g" },
+  // X周内 / X周后 / X个星期内 / X个星期后
+  { source: "([0-9一二三四五六七八九十两]+)(?:周|个?星期)(?:之内|以内|内|之后|以后|后)", flags: "g" },
 ];
 
 const INCOMPLETE_DATE = new RegExp(
@@ -235,7 +239,6 @@ const LEADING_STOP_RE = new RegExp(
   "^(?:到|至|去|在|将|把|交|送|带|携|须|需|应|该|了|的|请|并|或)"
 );
 
-// 尾部地点介词短语：到现场 / 在学校 / 至办公室 …
 const TRAILING_PLACE_RE = new RegExp(
   "[到在至去](?:现场|学校|教室|办公室|会场|门口|大厅|前台|服务台|报到处|签到处|座位|位置)"
 );
@@ -246,13 +249,6 @@ const HINT_FOLLOW = ["：", ":", "包括", "如下", "有", "含"];
 const RE_PAREN_CN = new RegExp("（[^（）]*）", "g");
 const RE_PAREN_EN = new RegExp("[（(][^()（）]*[）)]", "g");
 
-/**
- * 引导短语（出现在材料清单最前面、用来引出清单的说明文字）。
- * 覆盖：
- *   - [可选动作] + [可选如下/以下] + 材料/附件 + [可选包括/如下/有/含] + 冒号
- *   - 到/在/至/去 + 某地 + 交/提交/报送/递交 + 材料/附件 + 冒号
- *   - 单纯动作 + 冒号
- */
 const HINT_PREFIX_PATTERNS = [
   new RegExp(
     "^(?:需带|需提交|需交|需提供|需附|请交|请提交|请携带|请带|提交|上交|递交|报送|携带|自备)?" +
@@ -274,9 +270,6 @@ const HINT_PREFIX_PATTERNS = [
   ),
 ];
 
-/**
- * 去掉开头的引导短语。最多循环 3 次处理嵌套。
- */
 function stripLeadingHints(text) {
   let t = String(text || "").trim();
   for (let i = 0; i < 3; i++) {
@@ -312,32 +305,25 @@ function cleanMaterialItem(s) {
   let t = String(s || "").trim();
   if (!t) return null;
 
-  // 1. 去开头引导短语（材料：、需带材料如下：、到办公室交材料：…）
   t = stripLeadingHints(t);
   if (!t) return null;
 
-  // 2. 去首尾标点
   t = trimPunctuation(t);
 
-  // 3. 去开头的“数字 + 量词”（一支 / 三份 / 1张）。量词必须存在，
-  //    “一寸照片”的“寸”不是量词，整条不匹配，保留原样。
   t = t.replace(
     new RegExp("^[" + NUMBER_CHARS + "]+[" + QUANTIFIER_CHARS + "]"),
     ""
   );
 
-  // 4. 去尾部“等”
   t = t.replace(new RegExp("等$"), "");
   t = trimPunctuation(t.trim());
 
-  // 5. 截断尾部地点介词短语（到现场 / 在学校 / 至办公室）
   const placeMatch = t.match(TRAILING_PLACE_RE);
   if (placeMatch && placeMatch.index > 0) {
     t = t.slice(0, placeMatch.index).trim();
     t = trimPunctuation(t);
   }
 
-  // 6. 去尾部数量词（两张 / 三份 / 1本 / 一件）
   t = t.replace(
     new RegExp("[" + NUMBER_CHARS + "]+[" + QUANTIFIER_CHARS + "]$"),
     ""
