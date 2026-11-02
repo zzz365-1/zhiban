@@ -196,6 +196,22 @@ export function mergeAIResult(ruleResult, aiResult, sourceText) {
   let location = aiResult.location || base.location || null;
   let audience = aiResult.audience || base.audience || null;
 
+  // 活动日期和时间。
+  // 本地值是从原文里截出来的，最可靠，优先用本地。
+  // 日期和时间又是一组不可拆字段，同来源同取舍，不能拿本地日期配模型时间。
+  let eventDate;
+  let eventTime;
+  if (base.eventDate) {
+    eventDate = base.eventDate;
+    eventTime = base.eventTime || null;
+  } else if (aiResult.eventDate) {
+    eventDate = aiResult.eventDate;
+    eventTime = aiResult.eventTime || null;
+  } else {
+    eventDate = null;
+    eventTime = null;
+  }
+
   const title = aiResult.title || null;
   const summary = aiResult.summary || null;
   const category = normalizeCategory(aiResult.category);
@@ -216,6 +232,8 @@ export function mergeAIResult(ruleResult, aiResult, sourceText) {
     return {
       deadline,
       time,
+      eventDate,
+      eventTime,
       location,
       materials,
       audience,
@@ -311,6 +329,41 @@ export function mergeAIResult(ruleResult, aiResult, sourceText) {
     }
   }
 
+  // ---- 活动日期核对 ----
+  // 和截止日同一天就不显示了，界面上两行一样的日期看着像程序出错。
+  if (eventDate && finalDeadline && eventDate === finalDeadline) {
+    eventDate = null;
+    eventTime = null;
+  }
+
+  if (eventDate) {
+    const g = groundDateValue(eventDate, sourceText);
+    if (g.accepted) {
+      if (g.position) positions.eventDate = g.position;
+      if (eventTime) {
+        const gt = groundTimeValue(eventTime, sourceText);
+        if (gt.accepted) {
+          if (gt.position) positions.eventTime = gt.position;
+        } else {
+          dropped.push({
+            field: "eventTime",
+            value: eventTime,
+            reason: gt.reason,
+          });
+          eventTime = null;
+        }
+      }
+    } else {
+      dropped.push({
+        field: "eventDate",
+        value: eventDate,
+        reason: g.reason,
+      });
+      eventTime = null;
+      eventDate = null;
+    }
+  }
+
   // materials
   const finalMaterials = [];
   for (const m of materials) {
@@ -356,6 +409,8 @@ export function mergeAIResult(ruleResult, aiResult, sourceText) {
   return {
     deadline: finalDeadline,
     time: finalTime,
+    eventDate,
+    eventTime,
     location: finalLocation,
     materials: finalMaterials,
     audience: finalAudience,

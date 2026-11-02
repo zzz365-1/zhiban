@@ -417,10 +417,58 @@ const CASES = [
       return r.deadline + "|" + r.time;
     }, expected: "11月5日|null" },
 
-  { name: "034b 活动在前带下午三点，截止在后不带时间", actual: () => {
-      const r = extractNotice("比赛11月3日下午3点举行，请于11月5日前报名。");
-      return r.deadline + "|" + r.time;
-    }, expected: "11月5日|null" },
+  // ===== 034c 新增：活动日期单独抽一个字段 =====
+  // 【为什么要加这一组】
+  // 用户说得很直接，有些通知有报名截止时间，也有活动举办时间，
+  // 而我们只有截至时间没有活动举办时间。
+  // 034b 只是让截止日不再被举办日抢走，用户真正要的是把举办日也显示出来。
+  // 所以新增 eventDate 和 eventTime 两个字段，这一组盯住三件事。
+  //   1 举办日要认出来，认的是定子和举行和举办和召开这类说法
+  //   2 举办时间和截止时间不许串，各归各的
+  //   3 只有一个日期的通知不许凭空造出第二个，界面上两行一样的日期像出错
+  // 返回值写成 截止日期|截止时间|活动日期|活动时间，抽不到就是 null。
+
+  { name: "034c 助学金通知，截止在前活动在后", actual: () => {
+      const r = extractNotice("请各学院于11月2日下午5点前将《国家助学金申请表》和家庭经济困难证明复印件报送至学生资助管理中心A301办公室。评委会定于11月3日晚7点，具体安排另行通知。");
+      return [r.deadline, r.time, r.eventDate, r.eventTime].map((v) => (v === null ? "null" : v)).join("|");
+    }, expected: "11月2日|17:00|11月3日|19:00" },
+
+  { name: "034c 歌手大赛，报名截止下午五点比赛晚七点", actual: () => {
+      const r = extractNotice("请于11月5日下午5点前将报名表发至邮箱。比赛定于11月8日晚7点在大学生活动中心举行。");
+      return [r.deadline, r.time, r.eventDate, r.eventTime].map((v) => (v === null ? "null" : v)).join("|");
+    }, expected: "11月5日|17:00|11月8日|19:00" },
+
+  { name: "034c 活动写在截止前面，两个都要给", actual: () => {
+      const r = extractNotice("我校运动会将于11月20日上午8点开幕，请各班级于11月10日前将报名表交至体育学院。");
+      return [r.deadline, r.time, r.eventDate, r.eventTime].map((v) => (v === null ? "null" : v)).join("|");
+    }, expected: "11月10日|null|11月20日|08:00" },
+
+  { name: "034c 只有截止没有活动，不许造第二个日期", actual: () => {
+      const r = extractNotice("请各班班长于11月15日下午5点前将名单报送至教务处A301办公室。");
+      return [r.deadline, r.time, r.eventDate, r.eventTime].map((v) => (v === null ? "null" : v)).join("|");
+    }, expected: "11月15日|17:00|null|null" },
+
+  { name: "034c 只有活动没有截止，不重复显示两行", actual: () => {
+      const r = extractNotice("评审会定于11月3日晚7点在会议室举行。");
+      return [r.deadline, r.time, r.eventDate, r.eventTime].map((v) => (v === null ? "null" : v)).join("|");
+    }, expected: "11月3日|19:00|null|null" },
+
+  { name: "034c 截止和举办同一天，只显示一行", actual: () => {
+      const r = extractNotice("请于11月5日前报名，说明会定于11月5日下午3点在报告厅举行。");
+      return [r.deadline, r.time, r.eventDate, r.eventTime].map((v) => (v === null ? "null" : v)).join("|");
+    }, expected: "11月5日|null|null|null" },
+
+  // 这一条日期前面没有任何活动名词，只能靠后面的举行两个字认出来。
+  // 上面几条都同时有定子和比赛这类前置词，只测前置词的话后置词就成了没人盯的死角。
+  { name: "034c 举办日只靠后面的举行两个字认出来", actual: () => {
+      const r = extractNotice("请于11月5日前提交报名表，11月8日晚7点举行决赛。");
+      return [r.deadline, r.time, r.eventDate, r.eventTime].map((v) => (v === null ? "null" : v)).join("|");
+    }, expected: "11月5日|null|11月8日|19:00" },
+
+  { name: "034c 举办日在逗号前，截止日在逗号后", actual: () => {
+      const r = extractNotice("会议定于11月8日晚7点在大学生活动中心举行，请于11月5日前将报名表发至邮箱。");
+      return [r.deadline, r.time, r.eventDate, r.eventTime].map((v) => (v === null ? "null" : v)).join("|");
+    }, expected: "11月5日|null|11月8日|19:00" },
 ];
 
 // ---------- 多金丝雀 ----------

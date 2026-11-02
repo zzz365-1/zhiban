@@ -223,7 +223,7 @@ const DEADLINE_AFTER_RE = new RegExp(
     "(?:之前|以前|截止|截至|前)"
 );
 
-function afterSliceForDeadline(text, end) {
+function clauseAfterSlice(text, end) {
   let s = text.slice(end, Math.min(text.length, end + 12));
   const p = s.search(/[，。；;！？、\n]/);
   if (p !== -1) s = s.slice(0, p);
@@ -242,7 +242,7 @@ function extractDeadlineCandidate(text) {
   if (candidates.length === 0) return null;
   for (const d of candidates) {
     const before = text.slice(Math.max(0, d.index - 15), d.index);
-    const after = afterSliceForDeadline(text, d.end);
+    const after = clauseAfterSlice(text, d.end);
     // 再看日期紧前面是不是每或者第几周这类周期引导。
     // 每逢周一前交表会抽出周一，靠这里挡掉，不能当成截止日。
     const nearBefore = text.slice(Math.max(0, d.index - 6), d.index);
@@ -262,6 +262,65 @@ function extractDeadlineCandidate(text) {
 function extractDeadline(text) {
   const d = extractDeadlineCandidate(text);
   return d ? d.text : null;
+}
+
+// ---------- 活动日期 ----------
+
+// 活动或者会议的引导词，写在日期前面。
+// 【为什么需要】
+// 一条通知里常常有两个日期，前面那个是要赶的截止日，后面那个是活动举办日。
+// 之前只有一个日期字段，举办日要么被当成截止日抢走，要么干脆没人管，
+// 用户拿着通知还是不知道活动哪天办。这里把它单独抽出来。
+const EVENT_BEFORE_RE = new RegExp(
+  "(?:定于|定在|将于|计划于|拟于|安排在|比赛|大赛|活动|会议|评审会|评议会|" +
+    "评委会|班会|讲座|培训|演出|仪式|典礼|开幕式|初赛|复赛|决赛|开赛|" +
+    "展览|论坛|答辩|体检|面试|考试|报到|集合)[ ]*$"
+);
+
+// 举办类动词，写在日期后面，日期和时间之间允许夹一个时间点。
+const EVENT_AFTER_RE = new RegExp(
+  "^[ ]*(?:(?:上午|下午|中午|晚上|晚|凌晨|早上|早晨|傍晚)[ ]*)?" +
+    "(?:[0-9]{1,2}[ ]*[点时](?:[ ]*[0-9]{1,2}[ ]*分?)?(?:[ ]*半)?[ ]*)?" +
+    "(?:举行|举办|召开|进行|开始|开赛|开幕|开展|启动|上课|开课|报到|集合|" +
+    "初赛|复赛|决赛|演出|放映|开馆|开放|答辩|面试|体检)"
+);
+
+/**
+ * 抽活动或者会议举办的日子。
+ *
+ * 【宁缺勿滥】
+ * 只有明确出现举办类说法才给值。拿不准就返回空，界面上不显示这一行，
+ * 也比给一个错的日期强。
+ *
+ * 【为什么不返回和截止日同一天的那个】
+ * 报名11月5日截止，会议11月5日下午3点开，这种情况界面上已经有一行11月5日了，
+ * 再显示一行活动日期还是11月5日，看着像程序出错。所以同一天就不重复给。
+ */
+function extractEventDateCandidate(text, deadlineCand) {
+  const candidates = findDateCandidates(text).filter((c) => {
+    if (INCOMPLETE_DATE.test(c.text)) return false;
+    if (isSignatureDate(text, c)) return false;
+    const nearBefore = text.slice(Math.max(0, c.index - 6), c.index);
+    if (RECURRING_DATE.test(nearBefore)) return false;
+    return true;
+  });
+  for (const c of candidates) {
+    if (deadlineCand) {
+      if (c.index === deadlineCand.index) continue;
+      if (deadlineCand.text === c.text) continue;
+    }
+    const before = text.slice(Math.max(0, c.index - 15), c.index);
+    const after = clauseAfterSlice(text, c.end);
+    if (EVENT_BEFORE_RE.test(before) || EVENT_AFTER_RE.test(after)) {
+      return c;
+    }
+  }
+  return null;
+}
+
+function extractEventDate(text, deadlineCand) {
+  const c = extractEventDateCandidate(text, deadlineCand);
+  return c ? c.text : null;
 }
 
 // ---------- 时间 ----------
@@ -1117,6 +1176,8 @@ export function extractNotice(text) {
 
   const result = {
     deadline: null,
+    eventDate: null,
+    eventTime: null,
     time: null,
     location: null,
     materials: [],
@@ -1127,6 +1188,9 @@ export function extractNotice(text) {
 
   const deadlineCand = extractDeadlineCandidate(clean);
   result.deadline = deadlineCand ? deadlineCand.text : null;
+  const eventCand = extractEventDateCandidate(clean, deadlineCand);
+  result.eventDate = eventCand ? eventCand.text : null;
+  result.eventTime = eventCand ? extractTime(clean, eventCand) : null;
   result.time = extractTime(clean, deadlineCand);
   result.location = extractLocation(clean);
   result.materials = extractMaterials(clean);

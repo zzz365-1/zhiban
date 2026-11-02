@@ -29,6 +29,10 @@ function eq(a, b) {
 const SOURCE =
   "关于报送材料的通知。请各学院于十一月十五日下午5点前将身份证（原件）和申请书交到图书馆六楼研讨室。";
 
+// 034c 用：一条带活动举办时间的通知，时间是晚7点。
+const EVENT_SRC =
+  "关于举办校园歌手大赛的通知。请于11月5日前提交报名表，决赛定于11月8日晚7点开始。";
+
 const CASES = [
   // --- 基础核对 ---
   { name: "真实地点（精确匹配）通过", actual: () => groundStringValue("图书馆六楼研讨室", SOURCE).accepted, expected: true },
@@ -69,6 +73,17 @@ const CASES = [
   { name: "时间：下午5点 通过", actual: () => groundTimeValue("下午5点", SOURCE).accepted, expected: true },
   { name: "时间：下午五点 通过", actual: () => groundTimeValue("下午五点", SOURCE).accepted, expected: true },
   { name: "时间：晚上9点（原文是下午5点）被拦", actual: () => groundTimeValue("晚上9点", SOURCE).accepted, expected: false },
+
+  // --- 034c 晚7点 ---
+  // 【为什么要单开一组】
+  // 真实踩过坑：决赛定于11月8日晚7点开始，模型给的时间是19点，
+  // 出处核对说原文里找不到，活动日期那一行的活动时间被剔成了空的。
+  // 抠时间片段的时段词表里只有晚上没有单独的晚字，晚7点被当成早上七点。
+  // 下面第二条是防误杀，早上七点不能因为原文有个七字就通过。
+  { name: "034c 晚7点，模型给19:00通过", actual: () => groundTimeValue("19:00", EVENT_SRC).accepted, expected: true },
+  { name: "034c 晚7点，模型给19点通过", actual: () => groundTimeValue("19点", EVENT_SRC).accepted, expected: true },
+  { name: "034c 晚7点，模型给07:00被拦", actual: () => groundTimeValue("07:00", EVENT_SRC).accepted, expected: false },
+  { name: "034c 晚7点，模型给07点被拦", actual: () => groundTimeValue("07点", EVENT_SRC).accepted, expected: false },
 
   // --- mergeAIResult 端到端 ---
   { name: "merge：编造地点被拦，location 变 null", actual: () => mergeAIResult({}, { location: "教务处一楼大厅" }, SOURCE).location, expected: null },

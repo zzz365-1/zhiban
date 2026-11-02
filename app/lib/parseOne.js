@@ -52,6 +52,16 @@ export async function parseOne(text) {
     }
   }
 
+  // 活动日期同样本地换算。
+  // 换不出来就原样留着，不因为活动日期模糊就去调模型，
+  // 调不调模型只看截止日期和地点，这条判断不能改。
+  if (ruleResult.eventDate && isFuzzyDate(ruleResult.eventDate)) {
+    const resolvedEvent = resolveRelativeDate(ruleResult.eventDate, now);
+    if (resolvedEvent) {
+      ruleResult.eventDate = resolvedEvent.normalized;
+    }
+  }
+
   if (isRuleResultGood(ruleResult)) {
     return { analysis: { ...ruleResult, _source: "rule" } };
   }

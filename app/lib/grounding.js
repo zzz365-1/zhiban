@@ -208,7 +208,7 @@ export function normalizeTimeValue(s) {
 
   if (hour === null) return null;
 
-  if ((t.includes("下午") || t.includes("晚上") || t.includes("傍晚")) && hour < 12) {
+  if ((t.includes("下午") || t.includes("晚") || t.includes("傍晚")) && hour < 12) {
     hour += 12;
   }
   if (t.includes("中午") && hour < 12) hour += 12;
@@ -282,8 +282,14 @@ export function findTimeInSource(value, sourceText) {
   const vNorm = normalizeTimeValue(v);
   if (!vNorm) return { accepted: false, position: null, mode: "none" };
 
+  // 【为什么要把晚和早晨也写进来】
+  // 真实踩过坑：决赛定于11月8日晚7点开始，模型返回的时间是19点，
+  // 出处核对却说原文里找不到，活动日期那一行的活动时间被剔成空的。
+  // 原因是这里抠时间片段的时段词表里只有晚上没有单独的晚字，
+  // 晚7点被抠成7点，归一化成早上七点，跟十九点对不上。
+  // 长词要放在短词前面，晚上必须先于晚匹配。
   const TIME_SPAN_RE = new RegExp(
-    "(?:上午|下午|中午|晚上|凌晨|早上|傍晚)?[0-9一二三四五六七八九十]+[点时](?:[0-9一二三四五六七八九十]+分)?(?:半)?|[0-9]{1,2}[:：][0-9]{1,2}",
+    "(?:上午|下午|中午|晚上|晚|凌晨|早上|早晨|傍晚)?[0-9一二三四五六七八九十]+[点时](?:[0-9一二三四五六七八九十]+分)?(?:半)?|[0-9]{1,2}[:：][0-9]{1,2}",
     "g"
   );
 

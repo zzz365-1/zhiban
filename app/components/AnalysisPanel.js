@@ -10,6 +10,22 @@ const FIELDS = [
   { key: "title", label: "标题", editable: true, full: true },
   { key: "deadline", label: "截止日期", editable: true, isDate: true },
   { key: "time", label: "具体时间", editable: true },
+  // 一条通知里常常还有一个活动或者会议举办的日子，和要赶的截止日不是同一天。
+  // 原来没有出口，举办日要么被当成截止日抢走，要么干脆没人管。
+  // 没有活动的通知不该显示这两行，也不该显示未识别，所以空就整行不渲染。
+  {
+    key: "eventDate",
+    label: "活动日期",
+    editable: true,
+    isDate: true,
+    hideWhenEmpty: true,
+  },
+  {
+    key: "eventTime",
+    label: "活动时间",
+    editable: true,
+    hideWhenEmpty: true,
+  },
   { key: "location", label: "地点", editable: true },
   {
     key: "materials",
@@ -129,24 +145,26 @@ export default function AnalysisPanel({
   }
 
   function saveEdit(field) {
-    if (field.isDate) {
-      const trimmed = draft.trim();
-      if (trimmed === "") {
-        onUpdate({ deadline: null });
+      // 日期字段可能是截止日期也可能是活动日期，按字段自己的键写回，
+      // 不能一律写成 deadline，否则编辑活动日期会把截止日期改掉。
+      if (field.isDate) {
+        const trimmed = draft.trim();
+        if (trimmed === "") {
+          onUpdate({ [field.key]: null });
+          cancelEdit();
+          return;
+        }
+        const parsed = parseUserDateInput(trimmed);
+        if (!parsed) {
+          setError(
+            "无法识别这个日期，请用 11月6日、2026-11-06 或 11/6 的写法。"
+          );
+          return;
+        }
+        onUpdate({ [field.key]: parsed.normalized });
         cancelEdit();
         return;
       }
-      const parsed = parseUserDateInput(trimmed);
-      if (!parsed) {
-        setError(
-          "无法识别这个日期，请用 11月6日、2026-11-06 或 11/6 的写法。"
-        );
-        return;
-      }
-      onUpdate({ deadline: parsed.normalized });
-      cancelEdit();
-      return;
-    }
 
     if (field.isMaterials) {
       const items = draft
@@ -204,7 +222,12 @@ export default function AnalysisPanel({
             )}
 
             <div className="grid grid-cols-2 gap-x-4 gap-y-2">
-            {FIELDS.map((field) => {
+            {FIELDS.filter((field) => {
+              if (!field.hideWhenEmpty) return true;
+              const v = analysis[field.key];
+              if (Array.isArray(v)) return v.length > 0;
+              return Boolean(v);
+            }).map((field) => {
               const isEditing = editingKey === field.key;
               const text = getDisplayText(
                 field,

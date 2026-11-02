@@ -27,10 +27,18 @@ export function buildSystemPrompt(today = new Date()) {
 - 如果通篇没有截止类动作，只有“定于某日某时在某地举行/召开/进行/举办”这类活动安排，把活动本身的日期作为 deadline。
 - 如果既没有截止动作，也找不到活动日期，deadline 填 null。
 
+关于 eventDate 的规则（重要）：
+- 很多通知里有两个日期，一个是报名或者报送的截止日，另一个是活动或者会议举办的日子。这时候 deadline 填截止日，eventDate 填举办的日子。
+- eventDate 只在真有第二个日期时才填。如果整篇只有一个日期，eventDate 一律填 null，不要和 deadline 填同一个日子。
+- 判断举办日看这些说法：定于，将于，举行，举办，召开，开始，开幕，开赛，决赛，初赛，上课，报到，集合，答辩，面试，体检。
+- eventTime 是活动举办的具体时间，24小时制 HH:MM，原文没写就填 null。注意“晚7点”是 19:00，不是 07:00。
+
 json 的字段固定为：
 - title: 字符串，通知标题，没有则填 null
 - deadline: 字符串，按上面规则返回，没有则填 null
-- time: 字符串，具体时间（24小时制 HH:MM），没有则填 null
+- eventDate: 字符串，活动或者会议举办的日子，按上面规则返回，没有则填 null
+- time: 字符串，截止日当天的具体时间（24小时制 HH:MM），没有则填 null
+- eventTime: 字符串，活动举办的具体时间（24小时制 HH:MM），没有则填 null
 - location: 字符串，地点，没有则填 null
 - materials: 字符串数组，需要提交或携带的材料清单，没有则填 null
 - audience: 字符串，面向对象，没有则填 null
@@ -39,7 +47,7 @@ json 的字段固定为：
 
 规则：
 1. 只提取原文明确写出的信息，原文没写就填 null，绝对不要猜测或编造。
-2. deadline 和 time 要分开。例如“11月15日下午5点前”，deadline 是“11月15日”，time 是“17:00”。
+2. deadline 和 time 要分开。例如“11月15日下午5点前”，deadline 是“11月15日”，time 是“17:00”。eventDate 和 eventTime 同样分开。两个日期各有各的时间时不要串，活动的时间只能填进 eventTime，截止的时间只能填进 time。
 3. materials 要完整列出原文写到的每一件材料。括号里的补充说明不要放进 materials，只要材料名本身。
 4. audience 写成原文里的说法。如果原文有“@所有人”这类，audience 填“所有人”。
 5. 输出必须是合法 json，不要加 markdown 代码块，不要加解释。`;
@@ -49,7 +57,7 @@ export const FEW_SHOT_EXAMPLE = `示例输入：
 请各班班长于11月15日下午5点前将名单报送至教务处A301办公室。
 
 示例输出：
-{"title":"名单报送通知","deadline":"11月15日","time":"17:00","location":"教务处A301办公室","materials":["名单"],"audience":"各班班长","summary":"各班班长于11月15日17:00前报送名单","category":"行政"}`;
+{"title":"名单报送通知","deadline":"11月15日","eventDate":null,"time":"17:00","eventTime":null,"location":"教务处A301办公室","materials":["名单"],"audience":"各班班长","summary":"各班班长于11月15日17:00前报送名单","category":"行政"}`;
 
 export function buildUserMessage(text) {
   return FEW_SHOT_EXAMPLE + "\\\\n\\\\n现在请处理这条通知：\\\\n" + text;
