@@ -27,7 +27,7 @@
 | 三条核心迭代链（提问+AI方案+修Bug） | `prompts/README-core-iterations.md` |
 | 每日发生了什么、AI 交付了什么、发现了什么缺陷 | `docs/journal/` 三份日志 |
 | 阶段性结论与排期 | `docs/plan-2026-11-01.md` |
-| 沉淀的决策规矩（Dec-0XX） | `.workbuddy/memory/MEMORY.md`（自动加载） |
+| 沉淀的决策规矩（Dec-0XX） | `docs/journal/` 各日志中的「决策记录」小节 |
 | 相对日期换算实现 | `app/lib/relativeDate.js` |
 | 反幻觉出处核对 | `app/lib/grounding.js` |
 | 模型调用与结果融合 | `app/lib/aiExtract.js` |
