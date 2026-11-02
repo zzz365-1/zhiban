@@ -421,3 +421,70 @@ export function resolveRelativeDate(text, now = new Date()) {
 export function isResolvableRelativeDate(text) {
   return resolveRelativeDate(text, new Date()) !== null;
 }
+
+// ---------- 中文数字日期转阿拉伯数字 ----------
+
+const CN_DIGIT = {
+  零: 0, 〇: 0, 一: 1, 二: 2, 两: 2, 三: 3, 四: 4,
+  五: 5, 六: 6, 七: 7, 八: 8, 九: 9,
+};
+
+const CN_UNIT = { 十: 10, 百: 100, 千: 1000 };
+
+function cnNumberToInt(str) {
+  if (!str) return null;
+  if (new RegExp("^[0-9]+$").test(str)) return Number(str);
+
+  // 逐位写法，比如二〇二六和一二三
+  if (new RegExp("^[零〇一二两三四五六七八九]+$").test(str)) {
+    let v = 0;
+    for (const ch of str) v = v * 10 + CN_DIGIT[ch];
+    return v > 0 ? v : null;
+  }
+
+  // 含十百千的写法，比如十五和二十三和三十一
+  // 注意十单独出现时表示一个十，不能当成零
+  let total = 0;
+  let cur = 0;
+  for (const ch of str) {
+    if (ch in CN_DIGIT) {
+      cur = CN_DIGIT[ch];
+    } else if (ch in CN_UNIT) {
+      total += (cur === 0 ? 1 : cur) * CN_UNIT[ch];
+      cur = 0;
+    }
+  }
+  total += cur;
+  return total > 0 ? total : null;
+}
+
+const CN_FULL_DATE_RE = new RegExp(
+  "([零〇一二两三四五六七八九十]{2,4})年([一二三四五六七八九十]{1,3})月([一二三四五六七八九十]{1,3})[日号]",
+  "g"
+);
+
+const CN_MONTH_DAY_RE = new RegExp(
+  "([一二三四五六七八九十]{1,3})月([一二三四五六七八九十]{1,3})[日号]",
+  "g"
+);
+
+// 把中文数字写的日期换成阿拉伯数字，让后面的解析和日历都能用。
+// 真实踩过坑：通知里写请于二〇二六年十一月十五日前报送，
+// 模型能把这一串抽出来，但是转不成具体日期，日历加不进去。
+export function normalizeChineseDate(text) {
+  if (!text || typeof text !== "string") return text;
+  let out = text.replace(CN_FULL_DATE_RE, (m, y, mo, d) => {
+    const yy = cnNumberToInt(y);
+    const mm = cnNumberToInt(mo);
+    const dd = cnNumberToInt(d);
+    if (yy == null || mm == null || dd == null) return m;
+    return yy + "年" + mm + "月" + dd + "日";
+  });
+  out = out.replace(CN_MONTH_DAY_RE, (m, mo, d) => {
+    const mm = cnNumberToInt(mo);
+    const dd = cnNumberToInt(d);
+    if (mm == null || dd == null) return m;
+    return mm + "月" + dd + "日";
+  });
+  return out;
+}

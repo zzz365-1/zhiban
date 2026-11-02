@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>知办 大批量测试报告</title>
+<style>
+  body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; margin:0; background:#f6f7f9; color:#1a1a1a; font-size:14px; }
+  .wrap { padding:14px; }
+  h1 { font-size:19px; margin:0 0 4px; }
+  .sub { color:#6b7280; font-size:12px; margin-bottom:14px; }
+  .cards { display:grid; grid-template-columns:repeat(2,1fr); gap:8px; margin-bottom:16px; }
+  .card { background:#fff; border:1px solid #e5e7eb; border-radius:10px; padding:10px 12px; }
+  .card b { display:block; font-size:20px; line-height:1.2; }
+  .card span { font-size:12px; color:#6b7280; }
+  .card.red b { color:#c62828; }
+  table { width:100%; border-collapse:collapse; background:#fff; font-size:12px; }
+  th, td { border:1px solid #e5e7eb; padding:6px 8px; text-align:left; vertical-align:top; }
+  th { background:#eef1f5; font-weight:600; position:sticky; top:0; }
+  tr.bad td { background:#fff5f5; }
+  td.num { font-weight:600; width:28px; }
+  td.notice { max-width:230px; color:#374151; line-height:1.5; }
+  td.src { font-size:11px; color:#6b7280; }
+  .ms { color:#9ca3af; }
+  .ok { color:#2e7d32; }
+  .err { color:#c62828; line-height:1.4; }
+  .warn { color:#b26a00; line-height:1.4; }
+  .diff { color:#b26a00; font-size:11px; margin-top:3px; }
+  .note { background:#fff; border:1px solid #e5e7eb; border-radius:10px; padding:12px; margin-bottom:14px; font-size:12px; line-height:1.7; color:#374151; }
+  @media (max-width:640px){ .cards{grid-template-columns:repeat(2,1fr);} }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>知办 · 大批量真实链路测试</h1>
+  <div class="sub">60 条通知 · 基准日 2026年11月2日 · 走生产链路 parseOne</div>
+  <div class="cards">
+    <div class="card"><b>60</b><span>测试条数</span></div>
+    <div class="card"><b>628ms</b><span>单条平均耗时</span></div>
+    <div class="card"><b>40</b><span>调用模型条数</span></div>
+    <div class="card"><b>0</b><span>模型失败</span></div>
+    <div class="card red"><b>6</b><span>自动检查报问题</span></div>
+    <div class="card"><b>2</b><span>出处核对剔除过值</span></div>
+    <div class="card red"><b>6</b><span>日期与人工判断有差异</span></div>
+    <div class="card red"><b>10</b><span>地点与人工判断有差异</span></div>
+  </div>
+  <div class="note">
+    自动检查不看期望值，只看值本身站不站得住：日期能不能转成具体日期，地点时间对象材料能不能在原文里找到出处，
+    模型有没有调用失败，同一条跑两遍结果一不一样。<br>
+    橙色「与人工判断有差异」不等于程序错，是口径分歧或需要人裁断的地方，逐条看原文再定谁对。
+  </div>
+  <table>
+    <thead><tr><th>#</th><th>通知原文</th><th>截止日期</th><th>时间</th><th>地点</th><th>材料</th><th>对象</th><th>分类</th><th>来源</th><th>检查</th></tr></thead>
+    <tbody>
+<tr class=""><td class="num">1</td><td class="notice">关于2026至2027学年第二学期公共选修课选课的通知<br>各学院：<br>公共选修课网上选课将于12月8日9:00开始，12月15日17:00截止。请同学们登录教务系统完成选课，逾期不再受理。<br>教务处<br>2026年11月28日</td><td>12月15日</td><td>17:00</td><td>-</td><td>-</td><td>各学院</td><td>教务</td><td class="src">mixed<div class='ms'>1727ms</div></td><td><div class="warn">出处核对剔除：[{&quot;field&quot;:&quot;audience&quot;,&quot;value&quot;:&quot;各学院、同学们&quot;,&quot;reason&quot;:&quot;AI 值找不到出处，退回本地值&quot;}]</div></td></tr>
+<tr class=""><td class="num">2</td><td class="notice">关于期末考试安排的通知<br>本学期期末考试定于2027年1月11日至1月15日举行。请各学院于12月20日前将监考人员名单报送至教务处考务科。<br>教务处</td><td>12月20日</td><td>-</td><td>教务处考务科</td><td>监考人员名单</td><td>各学院</td><td>教务</td><td class="src">mixed<div class='ms'>740ms</div></td><td><span class="ok">通过</span></td></tr>
+<tr class=""><td class="num">3</td><td class="notice">关于核查上学期成绩的通知<br>如对上学期成绩有异议，请于11月10日前到行政楼B205办理成绩核查手续，需携带本人学生证和成绩核查申请表。</td><td>11月10日</td><td>-</td><td>行政楼B205</td><td>本人学生证、成绩核查申请表</td><td>-</td><td>-</td><td class="src">rule<div class='ms'>1ms</div></td><td><span class="ok">通过</span></td></tr>
+<tr class="bad"><td class="num">4</td><td class="notice">国家助学金评定通知<br>各班级：<br>请各班于11月18日下午5点前将国家助学金申请表及家庭经济困难证明交至学生资助管理中心。<br>学生处</td><td>11月18日</td><td>17:00</td><td>学生资助管理中心</td><td>申请表、证明</td><td>各班级</td><td>-</td><td class="src">rule<div class='ms'>0ms</div></td><td><div class="err">时间：原文中找不到</div></td></tr>
+<tr class=""><td class="num">5</td><td class="notice">关于开展宿舍安全卫生检查的通知<br>学生处定于11月12日至11月14日对全校学生宿舍进行安全卫生检查，请各宿舍提前整理，届时留人配合。</td><td>11月12日<div class="diff">不一致（11月12日 对 11月14日）</div></td><td>-</td><td>全校学生宿舍<div class="diff">部分一致（全校学生宿舍 对 学生宿舍）</div></td><td>-</td><td>全校学生宿舍</td><td>后勤</td><td class="src">mixed<div class='ms'>864ms</div></td><td><span class="ok">通过</span></td></tr>
+<tr class=""><td class="num">6</td><td class="notice">学术讲座通知<br>讲座题目，人工智能与城市发展<br>时间，11月6日19:00<br>地点，图书馆三楼报告厅<br>欢迎广大师生参加。</td><td>11月6日</td><td>19:00</td><td>三楼报告厅<div class="diff">部分一致（三楼报告厅 对 图书馆三楼报告厅）</div></td><td>-</td><td>-</td><td>-</td><td class="src">rule<div class='ms'>0ms</div></td><td><span class="ok">通过</span></td></tr>
+<tr class=""><td class="num">7</td><td class="notice">关于举办第八届结构设计竞赛的通知<br>报名截止时间为11月25日，请参赛队伍于11月25日前将报名表发送至邮箱，并将纸质版交至土木学院A309办公室。</td><td>11月25日</td><td>-</td><td>土木学院A309办公室</td><td>报名表</td><td>-</td><td>-</td><td class="src">rule<div class='ms'>0ms</div></td><td><span class="ok">通过</span></td></tr>
+<tr class=""><td class="num">8</td><td class="notice">志愿服务活动报名<br>校青年志愿者协会将于11月9日组织社区志愿服务活动，需招募志愿者40名，有意者请于11月7日前在各学院团委报名。</td><td>11月7日</td><td>-</td><td>各学院团委</td><td>-</td><td>有意者</td><td>活动</td><td class="src">mixed<div class='ms'>675ms</div></td><td><span class="ok">通过</span></td></tr>
+<tr class=""><td class="num">9</td><td class="notice">图书馆关于部分区域闭馆整理的通知<br>因书架调整，图书馆二楼社科阅览室将于11月5日至10日闭馆整理，请同学们提前安排借阅时间。</td><td>11月5日</td><td>-</td><td>二楼社科阅览室<div class="diff">部分一致（二楼社科阅览室 对 图书馆二楼社科阅览室）</div></td><td>-</td><td>-</td><td>-</td><td class="src">rule<div class='ms'>0ms</div></td><td><span class="ok">通过</span></td></tr>
+<tr class="bad"><td class="num">10</td><td class="notice">关于2026级新生体检补检的通知<br>请未参加体检的同学于11月13日上午8点到11点到校医院三楼体检中心补检，需携带校园卡和一寸照片一张。</td><td>11月13日</td><td>08:00</td><td>11点到校医院三楼体检中心<div class="diff">部分一致（11点到校医院三楼体检中心 对 校医院三楼体检中心）</div></td><td>校园卡、一寸照片</td><td>-</td><td>-</td><td class="src">rule<div class='ms'>0ms</div></td><td><div class="err">时间：原文中找不到</div></td></tr>
+<tr class=""><td class="num">11</td><td class="notice">校园网维护通知<br>网络中心将于11月8日22:00至次日6:00对校园网核心设备进行维护，期间网络可能中断，请提前做好准备。</td><td>-<div class="diff">程序为空，人工判有值</div></td><td>22:00</td><td>-</td><td>-</td><td>-</td><td>后勤</td><td class="src">mixed<div class='ms'>1004ms</div></td><td><span class="ok">通过</span></td></tr>
+<tr class=""><td class="num">12</td><td class="notice">关于报销截止的通知<br>请各学院于12月10日前将本年度科研经费报销单据报送财务处，逾期不再受理。</td><td>12月10日</td><td>-</td><td>财务处</td><td>本年度科研经费报销单据</td><td>各学院</td><td>行政</td><td class="src">mixed<div class='ms'>990ms</div></td><td><span class="ok">通过</span></td></tr>
+<tr class=""><td class="num">13</td><td class="notice">关于办理户籍迁移的通知<br>需要办理户籍迁移的同学请于12月1日前携带录取通知书、户口本原件到保卫处户籍科办理。</td><td>12月1日</td><td>-</td><td>保卫处户籍科</td><td>录取通知书、户口本原件</td><td>需要办理户籍迁移的同学</td><td>行政</td><td class="src">mixed<div class='ms'>743ms</div></td><td><span class="ok">通过</span></td></tr>
+<tr class=""><td class="num">14</td><td class="notice">毕业生档案转递通知<br>请2027届毕业生于12月5日前登录就业系统确认档案转递地址，逾期将按默认地址寄送。</td><td>12月5日</td><td>-</td><td>-</td><td>-</td><td>2027届毕业生</td><td>行政</td><td class="src">mixed<div class='ms'>1060ms</div></td><td><span class="ok">通过</span></td></tr>
+<tr class=""><td class="num">15</td><td class="notice">心理健康讲座通知<br>时间，11月11日15:00<br>地点，大学生活动中心多功能厅<br>主题，压力管理与情绪调节<br>请各班心理委员组织同学参加。</td><td>11月11日</td><td>15:00</td><td>大学生活动中心多功能厅</td><td>-</td><td>各班</td><td>活动</td><td class="src">mixed<div class='ms'>950ms</div></td><td><div class="warn">出处核对剔除：[{&quot;field&quot;:&quot;audience&quot;,&quot;value&quot;:&quot;各班心理委员及同学&quot;,&quot;reason&quot;:&quot;AI 值找不到出处，退回本地值&quot;}]</div></td></tr>
+<tr class=""><td class="num">16</td><td class="notice">关于寒假放假的通知<br>寒假自2027年1月18日起至2月28日止，学生宿舍将于1月20日封闭。</td><td>-<div class="diff">程序为空，人工判有值</div></td><td>-</td><td>-<div class="diff">程序为空，人工判有值</div></td><td>-</td><td>-</td><td>行政</td><td class="src">mixed<div class='ms'>702ms</div></td><td><span class="ok">通过</span></td></tr>
+<tr class="bad"><td class="num">17</td><td class="notice">关于每周例会时间的通知<br>学生会各部门每周三下午三点在行政楼会议室召开例会，请全体成员准时参加。</td><td>每周三<div class="diff">程序有值，人工判空</div></td><td>15:00</td><td>行政楼会议室</td><td>-</td><td>全体成员</td><td>活动</td><td class="src">mixed<div class='ms'>864ms</div></td><td><div class="err">日期：无法转成具体日期</div><div class="err">时间：原文中找不到</div></td></tr>
+<tr class="bad"><td class="num">18</td><td class="notice">关于提交课程论文的通知<br>请各位同学于第12周前将课程论文提交至任课教师，逾期不候。</td><td>第12周前<div class="diff">程序有值，人工判空</div></td><td>-</td><td>-</td><td>课程论文</td><td>各位同学</td><td>教务</td><td class="src">mixed<div class='ms'>739ms</div></td><td><div class="err">日期：无法转成具体日期</div></td></tr>
+<tr class=""><td class="num">19</td><td class="notice">紧急通知<br>请各班班长于三天后将班级人数统计表交至辅导员办公室。</td><td>2026年11月5日</td><td>-</td><td>辅导员办公室</td><td>-</td><td>各班班长</td><td>-</td><td class="src">rule<div class='ms'>0ms</div></td><td><span class="ok">通过</span></td></tr>
+<tr class="bad"><td class="num">20</td><td class="notice">本周五下午5点前请将运动会报名表交到体育学院办公室。</td><td>2026年11月6日</td><td>17:00</td><td>体育学院办公室</td><td>报名表</td><td>-</td><td>-</td><td class="src">rule<div class='ms'>0ms</div></td><td><div class="err">时间：原文中找不到</div></td></tr>
+<tr class=""><td class="num">21</td><td class="notice">请于下周三之前将实习报告交至学院教务办。</td><td>2026年11月11日</td><td>-</td><td>学院教务办</td><td>实习报告</td><td>-</td><td>教务</td><td class="src">mixed<div class='ms'>690ms</div></td><td><span class="ok">通过</span></td></tr>
+<tr class=""><td class="num">22</td><td class="notice">本月底前请完成学费缴纳，逾期将影响选课。</td><td>2026年11月30日</td><td>-</td><td>-</td><td>-</td><td>-</td><td>行政</td><td class="src">mixed<div class='ms'>944ms</div></td><td><span class="ok">通过</span></td></tr>
+<tr class=""><td class="num">23</td><td class="notice">半个月后截止，请同学们尽快提交社会实践材料。</td><td>2026年11月17日</td><td>-</td><td>-</td><td>社会实践材料</td><td>同学们</td><td>教务</td><td class="src">mixed<div class='ms'>913ms</div></td><td><span class="ok">通过</span></td></tr>
+<tr class=""><td class="num">24</td><td class="notice">逾期不再受理，请尽快办理。</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>其他</td><td class="src">mixed<div class='ms'>628ms</div></td><td><span class="ok">通过</span></td></tr>
+<tr class=""><td class="num">25</td><td class="notice">同学们好，本学期助学金发放工作已启动，具体安排另行通知。<br>学生处<br>2026年10月20日</td><td>-</td><td>-</td><td>-</td><td>-</td><td>同学们</td><td>行政</td><td class="src">mixed<div class='ms'>918ms</div></td><td><span class="ok">通过</span></td></tr>
+<tr class=""><td class="num">26</td><td class="notice">初稿请于11月5日前提交至各班班长，答辩定于11月20日举行。</td><td>11月5日</td><td>-</td><td>-</td><td>初稿</td><td>各班班长</td><td>教务</td><td class="src">mixed<div class='ms'>1025ms</div></td><td><span class="ok">通过</span></td></tr>
+<tr class=""><td class="num">27</td><td class="notice">关于2027年研究生招生考试的通知<br>考试时间为2026年12月19日至20日，请考生于12月10日前登录系统打印准考证。</td><td>12月10日</td><td>-</td><td>-</td><td>准考证</td><td>考生</td><td>教务</td><td class="src">mixed<div class='ms'>835ms</div></td><td><span class="ok">通过</span></td></tr>
+<tr class=""><td class="num">28</td><td class="notice">请于二〇二六年十一月十五日前将材料报送至行政楼A301。</td><td>2026年11月15日<div class="diff">程序有值，人工判空</div></td><td>-</td><td>行政楼A301</td><td>材料</td><td>-</td><td>-</td><td class="src">rule<div class='ms'>0ms</div></td><td><span class="ok">通过</span></td></tr>
+<tr class=""><td class="num">29</td><td class="notice">报名系统将于11月20日17:00关闭，请在此之前完成报名。</td><td>11月20日</td><td>17:00</td><td>-</td><td>-</td><td>-</td><td>其他</td><td class="src">mixed<div class='ms'>905ms</div></td><td><span class="ok">通过</span></td></tr>
+<tr class=""><td class="num">30</td><td class="notice">学校将于11月22日举行秋季运动会，请各班组织同学参加。</td><td>11月22日</td><td>-</td><td>-</td><td>-</td><td>各班</td><td>活动</td><td class="src">mixed<div class='ms'>1042ms</div></td><td><span class="ok">通过</span></td></tr>
+<tr class=""><td class="num">31</td><td class="notice">请到行政楼A301办公室办理手续。</td><td>-</td><td>-</td><td>行政楼A301办公室</td><td>-</td><td>-</td><td>行政</td><td class="src">mixed<div class='ms'>989ms</div></td><td><span class="ok">通过</span></td></tr>
+<tr class=""><td class="num">32</td><td class="notice">活动地点，大学生活动中心一楼大厅<br>活动时间，11月15日18:30</td><td>11月15日</td><td>18:30</td><td>一楼大厅<div class="diff">部分一致（一楼大厅 对 大学生活动中心一楼大厅）</div></td><td>-</td><td>-</td><td>-</td><td class="src">rule<div class='ms'>0ms</div></td><td><span class="ok">通过</span></td></tr>
+<tr class=""><td class="num">33</td><td class="notice">迎新晚会将于学校大礼堂举办，时间为11月28日19:00。</td><td>11月28日</td><td>19:00</td><td>学校大礼堂</td><td>-</td><td>-</td><td>-</td><td class="src">rule<div class='ms'>0ms</div></td><td><span class="ok">通过</span></td></tr>
+<tr class=""><td class="num">34</td><td class="notice">本次培训线上进行，腾讯会议号885 4721 963，请于11月9日14:00准时参加。</td><td>11月9日</td><td>14:00</td><td>腾讯会议号885 4721 963<div class="diff">程序有值，人工判空</div></td><td>-</td><td>-</td><td>活动</td><td class="src">mixed<div class='ms'>1094ms</div></td><td><span class="ok">通过</span></td></tr>
+<tr class="bad"><td class="num">35</td><td class="notice">请同学们分别在图书馆南门和行政楼西侧集合，时间11月14日8:00。</td><td>11月14日</td><td>08:00</td><td>图书馆南门和行政楼<div class="diff">部分一致（图书馆南门和行政楼 对 图书馆南门）</div></td><td>-</td><td>-</td><td>-</td><td class="src">rule<div class='ms'>0ms</div></td><td><div class="err">时间：原文中找不到</div></td></tr>
+<tr class=""><td class="num">36</td><td class="notice">请各班于11月30日前完成综合素质测评自评。</td><td>11月30日</td><td>-</td><td>-</td><td>-</td><td>各班</td><td>教务</td><td class="src">mixed<div class='ms'>1121ms</div></td><td><span class="ok">通过</span></td></tr>
+<tr class=""><td class="num">37</td><td class="notice">需提交纸质版和电子版各一份，请于11月20日前交至学院办公室。</td><td>11月20日</td><td>-</td><td>学院办公室</td><td>-</td><td>-</td><td>-</td><td class="src">rule<div class='ms'>0ms</div></td><td><span class="ok">通过</span></td></tr>
+<tr class=""><td class="num">38</td><td class="notice">把表打印出来签字后交回学院，截止11月18日。</td><td>11月18日</td><td>-</td><td>学院</td><td>表</td><td>-</td><td>行政</td><td class="src">mixed<div class='ms'>1068ms</div></td><td><span class="ok">通过</span></td></tr>
+<tr class=""><td class="num">39</td><td class="notice">来的时候请带上你的学生证和一寸照片两张，时间地点另行通知。</td><td>-</td><td>-</td><td>-</td><td>学生证、一寸照片两张</td><td>-</td><td>其他</td><td class="src">mixed<div class='ms'>820ms</div></td><td><span class="ok">通过</span></td></tr>
+<tr class=""><td class="num">40</td><td class="notice">请携带本人身份证原件、学生证复印件各一份，于11月25日前交至财务处。</td><td>11月25日</td><td>-</td><td>财务处</td><td>本人身份证原件、学生证复印件</td><td>-</td><td>行政</td><td class="src">mixed<div class='ms'>1052ms</div></td><td><span class="ok">通过</span></td></tr>
+<tr class=""><td class="num">41</td><td class="notice">提交材料包括，申请表、成绩单、排名证明，请于12月3日前报送。</td><td>12月3日</td><td>-</td><td>-</td><td>申请表、成绩单、排名证明</td><td>-</td><td>行政</td><td class="src">mixed<div class='ms'>727ms</div></td><td><span class="ok">通过</span></td></tr>
+<tr class=""><td class="num">42</td><td class="notice">需准备一寸免冠照片两张，背面写明姓名学号，于11月16日前交至辅导员处。</td><td>11月16日</td><td>-</td><td>辅导员处</td><td>一寸免冠照片两张</td><td>-</td><td>行政</td><td class="src">mixed<div class='ms'>1133ms</div></td><td><span class="ok">通过</span></td></tr>
+<tr class=""><td class="num">43</td><td class="notice">请各班班长于11月12日前将名单报至学院。</td><td>11月12日</td><td>-</td><td>学院</td><td>名单</td><td>各班班长</td><td>行政</td><td class="src">mixed<div class='ms'>1030ms</div></td><td><span class="ok">通过</span></td></tr>
+<tr class=""><td class="num">44</td><td class="notice">所有人 请于11月5日前完成青年大学习。</td><td>11月5日</td><td>-</td><td>-</td><td>-</td><td>所有人</td><td>其他</td><td class="src">mixed<div class='ms'>791ms</div></td><td><span class="ok">通过</span></td></tr>
+<tr class=""><td class="num">45</td><td class="notice">各学院，请于11月8日前将推荐名单报送至学生处，并附电子版。</td><td>11月8日</td><td>-</td><td>学生处</td><td>推荐名单、电子版</td><td>各学院</td><td>行政</td><td class="src">mixed<div class='ms'>890ms</div></td><td><span class="ok">通过</span></td></tr>
+<tr class=""><td class="num">46</td><td class="notice">请各班班长、团支书于11月6日16:00到行政楼B301开会。</td><td>11月6日</td><td>16:00</td><td>行政楼B301</td><td>-</td><td>各班班长</td><td>-</td><td class="src">rule<div class='ms'>0ms</div></td><td><span class="ok">通过</span></td></tr>
+<tr class=""><td class="num">47</td><td class="notice">2023级全体同学请于11月19日前完成体测预约。</td><td>11月19日</td><td>-</td><td>-</td><td>-</td><td>2023级全体同学</td><td>教务</td><td class="src">mixed<div class='ms'>1183ms</div></td><td><span class="ok">通过</span></td></tr>
+<tr class=""><td class="num">48</td><td class="notice">关于助学金的通知<br>请于11月5日前交表。<br><br>关于运动会的通知<br>请于11月20日前报名。</td><td>11月5日</td><td>-</td><td>-</td><td>表</td><td>-</td><td>行政</td><td class="src">mixed<div class='ms'>862ms</div></td><td><span class="ok">通过</span></td></tr>
+<tr class=""><td class="num">49</td><td class="notice">1. 关于助学金的通知，请于11月5日前交表 2. 关于运动会的通知，请于11月20日前报名</td><td>11月5日</td><td>-</td><td>-</td><td>表</td><td>-</td><td>行政</td><td class="src">mixed<div class='ms'>1015ms</div></td><td><span class="ok">通过</span></td></tr>
+<tr class=""><td class="num">50</td><td class="notice">明天交表。</td><td>2026年11月3日</td><td>-</td><td>-</td><td>表</td><td>-</td><td>其他</td><td class="src">mixed<div class='ms'>821ms</div></td><td><span class="ok">通过</span></td></tr>
+<tr class=""><td class="num">51</td><td class="notice">关于做好2026年度学生工作总结的通知<br>各学院、各有关部门：<br>为全面总结本年度学生工作，请各单位于12月15日前将年度工作总结报送学生工作部。总结内容应包括思想政治教育开展情况、学风建设成效、困难学生帮扶情况、心理健康教育开展情况、学生活动组织情况以及存在的主要问题与改进思路。总结材料需提交纸质版一份并加盖单位公章，同时报送电子版至学生工作部邮箱。纸质版请送至行政楼A305办公室，电子版请以学院名称命名后发送。逾期未报送的单位将予以通报。联系人，张老师。<br>学生工作部</td><td>12月15日</td><td>-</td><td>行政楼A305办公室</td><td>材料</td><td>各学院</td><td>-</td><td class="src">rule<div class='ms'>0ms</div></td><td><span class="ok">通过</span></td></tr>
+<tr class=""><td class="num">52</td><td class="notice">转发，关于做好冬季安全工作的通知<br>请各学院于11月15日前开展安全教育活动，并将总结报保卫处。</td><td>11月15日</td><td>-</td><td>-<div class="diff">程序为空，人工判有值</div></td><td>总结</td><td>各学院</td><td>行政</td><td class="src">mixed<div class='ms'>885ms</div></td><td><span class="ok">通过</span></td></tr>
+<tr class=""><td class="num">53</td><td class="notice">请于11月21日前将附件1学生信息登记表填写完毕并发送至邮箱。</td><td>11月21日</td><td>-</td><td>-</td><td>附件1学生信息登记表</td><td>-</td><td>行政</td><td class="src">mixed<div class='ms'>1218ms</div></td><td><span class="ok">通过</span></td></tr>
+<tr class=""><td class="num">54</td><td class="notice">如有疑问请联系学生处张老师，电话010-12345678。请于11月30日前提交材料至行政楼A208。</td><td>11月30日</td><td>-</td><td>行政楼A208</td><td>材料</td><td>-</td><td>-</td><td class="src">rule<div class='ms'>0ms</div></td><td><span class="ok">通过</span></td></tr>
+<tr class=""><td class="num">55</td><td class="notice">紧急通知，因系统故障，原定11月10日的报名推迟至11月17日，请相互转告。</td><td>11月17日</td><td>-</td><td>-</td><td>-</td><td>-</td><td>行政</td><td class="src">mixed<div class='ms'>933ms</div></td><td><span class="ok">通过</span></td></tr>
+<tr class=""><td class="num">56</td><td class="notice">关于开展学风建设月活动的通知<br>请各班积极组织同学参与。</td><td>-</td><td>-</td><td>-</td><td>-</td><td>各班</td><td>活动</td><td class="src">mixed<div class='ms'>1075ms</div></td><td><span class="ok">通过</span></td></tr>
+<tr class=""><td class="num">57</td><td class="notice">请各班于11月24日前将填写好的表格交到学生事务大厅三号窗口，并领取回执单。</td><td>11月24日</td><td>-</td><td>学生事务大厅三号<div class="diff">部分一致（学生事务大厅三号 对 学生事务大厅）</div></td><td>表格</td><td>各班</td><td>-</td><td class="src">rule<div class='ms'>1ms</div></td><td><span class="ok">通过</span></td></tr>
+<tr class=""><td class="num">58</td><td class="notice">需提交，身份证复印件、学生证复印件、一寸照片2张。请于12月8日前交至行政楼C105。</td><td>12月8日</td><td>-</td><td>行政楼C105</td><td>身份证复印件、学生证复印件、一寸照片</td><td>-</td><td>-</td><td class="src">rule<div class='ms'>0ms</div></td><td><span class="ok">通过</span></td></tr>
+<tr class=""><td class="num">59</td><td class="notice">关于在图书馆报告厅召开考研动员会的通知<br>时间，11月23日14:30，请全体考研学生参加。</td><td>11月23日</td><td>14:30</td><td>图书馆报告厅</td><td>-</td><td>全体考研学生</td><td>-</td><td class="src">rule<div class='ms'>0ms</div></td><td><span class="ok">通过</span></td></tr>
+<tr class=""><td class="num">60</td><td class="notice">请于11月26日14:00到大学生活动中心三楼会议室参加就业指导讲座。</td><td>11月26日</td><td>14:00</td><td>大学生活动中心三楼会议室</td><td>-</td><td>-</td><td>-</td><td class="src">rule<div class='ms'>0ms</div></td><td><span class="ok">通过</span></td></tr>
+    </tbody>
+  </table>
+</div>
+</body>
+</html>

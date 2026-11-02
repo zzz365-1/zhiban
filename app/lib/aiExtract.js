@@ -7,6 +7,7 @@ import {
   groundDateValue,
   groundTimeValue,
 } from "./grounding.js";
+import { resolveRelativeDate } from "./relativeDate.js";
 
 export const VALID_CATEGORIES = ["教务", "活动", "行政", "后勤", "其他"];
 
@@ -95,10 +96,36 @@ const FUZZY_DATE_PATTERNS = [
   ),
 ];
 
-export function isFuzzyDate(s) {
+export function isFuzzyDate(s, now = new Date()) {
   if (!s) return false;
   const t = String(s).trim();
   for (const re of FUZZY_DATE_PATTERNS) {
+    if (re.test(t)) return true;
+  }
+  // 以换算函数为准，不再只靠上面那张表。
+  // 真实踩过坑：半个月后 半年后 一季度后 换算函数明明算得出来，
+  // 可是表里没有这些写法，于是被判成非模糊，压根没去调换算，
+  // 界面上就原样显示半个月后。两边各写一份清单早晚对不齐，
+  // 所以这里改成换算函数能算就算模糊，旧表只作兜底保留。
+  return Boolean(resolveRelativeDate(t, now));
+}
+
+// 周期与教学周不是能落到日历上的某一天。
+// 本地规则那边已经拦过一次，但模型返回的值不走那条路，
+// 所以必须在合并之后再拦一次，否则周期会从模型的口子漏回界面。
+const NON_CALENDAR_DATE_PATTERNS = [
+  new RegExp("^每(周|星期|月|年|天|日)"),
+  new RegExp("^每[0-9一二三四五六七八九十两]+(周|星期|个?月|年)"),
+  new RegExp(
+    "^第[0-9一二三四五六七八九十]{1,3}周(前|以前|之前|内|以内|后|以后|之后)?$"
+  ),
+  new RegExp("^(每周|每隔|每逢)"),
+];
+
+export function isNonCalendarDate(s) {
+  if (!s) return false;
+  const t = String(s).trim();
+  for (const re of NON_CALENDAR_DATE_PATTERNS) {
     if (re.test(t)) return true;
   }
   return false;
@@ -173,6 +200,17 @@ export function mergeAIResult(ruleResult, aiResult, sourceText) {
   const summary = aiResult.summary || null;
   const category = normalizeCategory(aiResult.category);
 
+  // ---- 周期与教学周统一拦截 ----
+  // 放在第一步合并之后，不管这个值来自本地规则还是模型都过同一道闸。
+  // 031 大批量测试实测：每周三和第12周前从模型口子漏回来，
+  // 界面上显示了一个根本加不进日历的截止日期，所以这里必须再拦一次。
+  let nonCalendarDropped = null;
+  if (deadline && isNonCalendarDate(deadline)) {
+    nonCalendarDropped = deadline;
+    deadline = null;
+    time = null;
+  }
+
   // ---- 第二步：出处核对 ----
   if (skipGrounding) {
     return {
@@ -188,7 +226,15 @@ export function mergeAIResult(ruleResult, aiResult, sourceText) {
       _inferredDeadline: inferred,
       _groundingSkipped: true,
       _groundingPositions: {},
-      _groundingDropped: [],
+      _groundingDropped: nonCalendarDropped
+        ? [
+            {
+              field: "deadline",
+              value: nonCalendarDropped,
+              reason: "周期或教学周不是具体日期",
+            },
+          ]
+        : [],
     };
   }
 
@@ -297,6 +343,14 @@ export function mergeAIResult(ruleResult, aiResult, sourceText) {
       dropped.push({ field: "audience", value: audience, reason: g.reason });
       finalAudience = null;
     }
+  }
+
+  if (nonCalendarDropped) {
+    dropped.push({
+      field: "deadline",
+      value: nonCalendarDropped,
+      reason: "周期或教学周不是具体日期",
+    });
   }
 
   return {

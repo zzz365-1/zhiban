@@ -34,11 +34,14 @@ import {
   mergeAIResult,
   isFuzzyDate,
 } from "./aiExtract.js";
-import { resolveRelativeDate } from "./relativeDate.js";
+import { resolveRelativeDate, normalizeChineseDate } from "./relativeDate.js";
 
 export async function parseOne(text) {
   const now = new Date();
-  const ruleResult = extractNotice(text);
+  // 中文数字写的日期先换成阿拉伯数字，本地规则和模型才认得。
+  // 只影响抽取用的文本，界面上展示给用户的原文不动。
+  const workText = normalizeChineseDate(text);
+  const ruleResult = extractNotice(workText);
 
   // 本地优先换算相对日期
   if (ruleResult.deadline && isFuzzyDate(ruleResult.deadline)) {
@@ -54,8 +57,8 @@ export async function parseOne(text) {
   }
 
   try {
-    const aiResult = await callAIExtract(text);
-    const merged = mergeAIResult(ruleResult, aiResult, text);
+    const aiResult = await callAIExtract(workText);
+    const merged = mergeAIResult(ruleResult, aiResult, workText);
 
     // AI 返回的 deadline 如果仍是相对日期，本地再换算一次
     if (merged.deadline && isFuzzyDate(merged.deadline)) {
