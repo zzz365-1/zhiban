@@ -205,7 +205,32 @@ function isSignatureDate(text, cand) {
   return nearStart || nearEnd;
 }
 
-function extractDeadline(text) {
+// 日期后面紧跟的截止说法。
+// 【为什么要把时间也写进来】
+// 真实踩过坑：请于11月5日下午5点前将报名表发至邮箱。比赛定于11月8日晚7点举行。
+//   原来只看日期后面五个字，11月5日后面是下午5点前，五个字刚好被时间占满，
+//   前字落在窗口外面，截止标志等于没看见，11月5日被跳过。
+//   而11月8日后面是晚7点在大学生，同样没有标志，两个候选都没标志，
+//   函数直接返回空，界面上日期是空的，全丢给模型去猜。
+// 所以日期后面允许先夹一个时间点再接前字，窗口也放宽到十二个字。
+// 【为什么要先截断到标点】
+// 会议11月8日举行，请11月5日前交表。
+//   11月8日后面十二个字是举行，请11月5日前，末尾正好有个前字，
+//   不截断就会把开会日期误当成截止日，比不识别更糟。
+const DEADLINE_AFTER_RE = new RegExp(
+  "^[ ]*(?:(?:上午|下午|中午|晚上|晚|凌晨|早上|早晨|傍晚)[ ]*)?" +
+    "(?:[0-9]{1,2}[ ]*[点时](?:[ ]*[0-9]{1,2}[ ]*分?)?(?:[ ]*半)?[ ]*)?" +
+    "(?:之前|以前|截止|截至|前)"
+);
+
+function afterSliceForDeadline(text, end) {
+  let s = text.slice(end, Math.min(text.length, end + 12));
+  const p = s.search(/[，。；;！？、\n]/);
+  if (p !== -1) s = s.slice(0, p);
+  return s;
+}
+
+function extractDeadlineCandidate(text) {
   const candidates = findDateCandidates(text).filter((c) => {
     if (INCOMPLETE_DATE.test(c.text)) return false;
     if (isSignatureDate(text, c)) return false;
@@ -217,7 +242,7 @@ function extractDeadline(text) {
   if (candidates.length === 0) return null;
   for (const d of candidates) {
     const before = text.slice(Math.max(0, d.index - 15), d.index);
-    const after = text.slice(d.end, Math.min(text.length, d.end + 5));
+    const after = afterSliceForDeadline(text, d.end);
     // 再看日期紧前面是不是每或者第几周这类周期引导。
     // 每逢周一前交表会抽出周一，靠这里挡掉，不能当成截止日。
     const nearBefore = text.slice(Math.max(0, d.index - 6), d.index);
@@ -228,30 +253,85 @@ function extractDeadline(text) {
     ) {
       continue;
     }
-    if (DEADLINE_MARKERS.test(before) || /^ *前/.test(after)) return d.text;
+    if (DEADLINE_MARKERS.test(before) || DEADLINE_AFTER_RE.test(after)) return d;
   }
-  if (candidates.length === 1) return candidates[0].text;
+  if (candidates.length === 1) return candidates[0];
   return null;
+}
+
+function extractDeadline(text) {
+  const d = extractDeadlineCandidate(text);
+  return d ? d.text : null;
 }
 
 // ---------- 时间 ----------
 
-function extractTime(text) {
-  let m = text.match(
+/**
+ * 抽具体时间。
+ *
+ * 【为什么要限搜索范围】
+ * 真实踩过坑：请各学院于11月2日前将材料报送至中心。评审会定于11月3日晚7点举行。
+ *   日期抽的是11月2日，时间却从全文里抓到晚7点，那是评审会的时间，
+ *   界面上拼成11月2日19点，看着像那么回事，其实是两个日期的孩子拼在一起。
+ * 所以给了截止日期就只在它前后这一小段里找时间，找不到就当没有。
+ * 没有截止日期时保持原来的全文找法，不动老用例。
+ */
+// 分句边界。日期和时间必须落在同一小句里才算同源。
+const CLAUSE_SPLIT = /[，。；;！？、\n]/;
+
+/**
+ * 取出日期所在的那一小句，只在里面找时间。
+ *
+ * 【为什么不能只按字数取窗口】
+ * 真实踩过坑：报名截止11月5日，比赛定于11月8日晚7点开始。
+ *   按字数前后各取一段，逗号后面的晚7点也被框进来了，
+ *   截止日11月5日又挂上了19点，串台照旧。
+ * 所以先按标点切出这一句，再在句子里找。句子本身太长才退化成按字数截断。
+ */
+function timeScopeFor(text, cand) {
+  let start = 0;
+  for (let i = cand.index - 1; i >= 0; i--) {
+    if (CLAUSE_SPLIT.test(text[i])) {
+      start = i + 1;
+      break;
+    }
+  }
+  let end = text.length;
+  for (let i = cand.end; i < text.length; i++) {
+    if (CLAUSE_SPLIT.test(text[i])) {
+      end = i;
+      break;
+    }
+  }
+  if (cand.index - start > 20) start = cand.index - 20;
+  if (end - cand.end > 25) end = cand.end + 25;
+  return text.slice(start, Math.max(end, cand.end));
+}
+
+function extractTime(text, deadlineCand) {
+  let scope = text;
+  if (deadlineCand) {
+    scope = timeScopeFor(text, deadlineCand);
+  }
+  let m = scope.match(
     new RegExp(
-      "(上午|下午|中午|晚上|凌晨|早上|傍晚)[ ]*([0-9]{1,2})[ ]*[点时](?:[ ]*([0-9]{1,2})[ ]*分?)?(?:[ ]*半)?"
+      // 【为什么词表里要单独放一个晚字】
+      // 真实踩过坑：晚7点里的晚不在原来的时段词表里，
+      // 走上没有时段的那个分支，晚上七点被算成早上七点，差了十二个小时。
+      // 长词要放在短词前面，晚上必须先于晚匹配。
+      "(上午|下午|中午|晚上|晚|凌晨|早上|早晨|傍晚)[ ]*([0-9]{1,2})[ ]*[点时](?:[ ]*([0-9]{1,2})[ ]*分?)?(?:[ ]*半)?"
     )
   );
   if (m) {
     let h = parseInt(m[2], 10);
     let min = m[3] ? parseInt(m[3], 10) : /半/.test(m[0]) ? 30 : 0;
-    if (/(下午|晚上|傍晚|中午)/.test(m[1]) && h < 12) h += 12;
+    if (/(下午|晚上|晚|傍晚|中午)/.test(m[1]) && h < 12) h += 12;
     if (/凌晨/.test(m[1]) && h === 12) h = 0;
     return String(h).padStart(2, "0") + ":" + String(min).padStart(2, "0");
   }
-  m = text.match(new RegExp("(?<![0-9])([0-9]{1,2})[ ]*[:：][ ]*([0-9]{2})(?![0-9])"));
+  m = scope.match(new RegExp("(?<![0-9])([0-9]{1,2})[ ]*[:：][ ]*([0-9]{2})(?![0-9])"));
   if (m) return String(parseInt(m[1], 10)).padStart(2, "0") + ":" + m[2];
-  m = text.match(new RegExp("([0-9]{1,2})[ ]*[点时](?:[ ]*([0-9]{1,2})[ ]*分?)?(?:[ ]*半)?"));
+  m = scope.match(new RegExp("([0-9]{1,2})[ ]*[点时](?:[ ]*([0-9]{1,2})[ ]*分?)?(?:[ ]*半)?"));
   if (m) {
     const h = parseInt(m[1], 10);
     const min = m[2] ? parseInt(m[2], 10) : /半/.test(m[0]) ? 30 : 0;
@@ -1045,8 +1125,9 @@ export function extractNotice(text) {
 
   if (!clean) return result;
 
-  result.deadline = extractDeadline(clean);
-  result.time = extractTime(clean);
+  const deadlineCand = extractDeadlineCandidate(clean);
+  result.deadline = deadlineCand ? deadlineCand.text : null;
+  result.time = extractTime(clean, deadlineCand);
   result.location = extractLocation(clean);
   result.materials = extractMaterials(clean);
   result.audience = extractAudience(clean);

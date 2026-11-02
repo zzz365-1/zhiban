@@ -373,6 +373,54 @@ const CASES = [
   { name: "一季度内（2026-11-06）", actual: () => resolveOrNull("一季度内", NOW_FRIDAY_2026_1106), expected: "2027年2月6日" },
   { name: "一季度内（2026-12-31）", actual: () => resolveOrNull("一季度内", NOW_DEC31_2026), expected: "2027年3月31日" },
   { name: "一季度内（2026-01-31）", actual: () => resolveOrNull("一季度内", NOW_JAN31), expected: "2026年4月30日" },
+
+  // ===== 034b 新增：一条通知里同时有「报名截止」和「活动举办」两个日期 =====
+  // 【为什么要加这一组】
+  // 真实踩过坑：用户拿三张截图来问为什么识别不出来。
+  //   原文写的是11月2日下午5点前报送材料，评委会定于11月3日晚7点。
+  //   程序只给出一个日期，而且第三张截图把评审会的11月3日当成了截止日，
+  //   后面的具体时间还挂着17点，那是11月2日的时间，两个日期的孩子拼在一起。
+  // 根因有三条，这一组用例一条一条盯住：
+  //   1 日期后面夹了时间点再接前字，前字落在原来的五个字窗口外，截止标志看不见
+  //   2 全文里随便抓时间，抓到隔壁日期的时间
+  //   3 晚7点的晚字不在时段词表里，晚上七点被算成早上七点
+  // 期望值一律来自本机 import app/lib/extractNotice.js 实测，非人工推算。
+  // 返回值写成 日期|时间，时间抽不到就是 null，不许拿别处的时间顶上。
+
+  { name: "034b 截止带时间在前，活动带时间在后", actual: () => {
+      const r = extractNotice("请各学院于11月2日下午5点前将材料报送至学生资助管理中心A301办公室。评委会定于11月3日晚7点举行。");
+      return r.deadline + "|" + r.time;
+    }, expected: "11月2日|17:00" },
+
+  { name: "034b 截止不带时间，活动带晚七点", actual: () => {
+      const r = extractNotice("请于11月2日前将材料报送至学生资助管理中心A301办公室。评审会定于11月3日晚7点举行。");
+      return r.deadline + "|" + r.time;
+    }, expected: "11月2日|null" },
+
+  { name: "034b 报名截止下午五点，比赛晚七点", actual: () => {
+      const r = extractNotice("请于11月5日下午5点前将报名表发至邮箱。比赛定于11月8日晚7点在大学生活动中心举行。");
+      return r.deadline + "|" + r.time;
+    }, expected: "11月5日|17:00" },
+
+  { name: "034b 活动在前截止在后，不许被前字串过去", actual: () => {
+      const r = extractNotice("会议定于11月8日晚7点在大学生活动中心举行，请于11月5日前将报名表发至邮箱。");
+      return r.deadline + "|" + r.time;
+    }, expected: "11月5日|null" },
+
+  { name: "034b 只有活动日期也要给，晚七点算十九点", actual: () => {
+      const r = extractNotice("评审会定于11月3日晚7点在会议室举行。");
+      return r.deadline + "|" + r.time;
+    }, expected: "11月3日|19:00" },
+
+  { name: "034b 截止写在前头，比赛时间不许串过来", actual: () => {
+      const r = extractNotice("报名截止11月5日，比赛定于11月8日晚7点开始。");
+      return r.deadline + "|" + r.time;
+    }, expected: "11月5日|null" },
+
+  { name: "034b 活动在前带下午三点，截止在后不带时间", actual: () => {
+      const r = extractNotice("比赛11月3日下午3点举行，请于11月5日前报名。");
+      return r.deadline + "|" + r.time;
+    }, expected: "11月5日|null" },
 ];
 
 // ---------- 多金丝雀 ----------
