@@ -140,6 +140,44 @@ const CASES = [
     },
     expected: "2026年11月11日",
   },
+
+  // --- 035 本地分类兜底 ---
+  // 分类一直只有模型会填，无密钥时这一行是空的。这里盯住本地兜底。
+  {
+    name: "035 本地分类：学籍核对 → 教务",
+    actual: () => extractNotice("请于11月12日前登录教务系统核对个人学籍信息。").category,
+    expected: "教务",
+  },
+  {
+    name: "035 本地分类：宿舍检查 → 后勤（不被安全这个词抢走）",
+    actual: () =>
+      extractNotice("11月20日上午9点起对全校学生宿舍进行安全卫生检查。").category,
+    expected: "后勤",
+  },
+  {
+    name: "035 本地分类：主题班会 → 行政（不被考试这个词抢走）",
+    actual: () =>
+      extractNotice("各班于下周三下午4点召开诚信考试主题班会。").category,
+    expected: "行政",
+  },
+  {
+    name: "035 本地分类：歌手大赛 → 活动",
+    actual: () =>
+      extractNotice("第十五届校园歌手大赛报名截止11月10日17:00。").category,
+    expected: "活动",
+  },
+  {
+    name: "035 本地分类：助学金评审 → 行政",
+    actual: () =>
+      extractNotice("关于2026年国家助学金评审工作安排的通知，评审会定于11月8日。")
+        .category,
+    expected: "行政",
+  },
+  {
+    name: "035 本地分类：认不出来的给 null，不乱猜（防误杀）",
+    actual: () => extractNotice("请各位同学相互转告，谢谢配合。").category,
+    expected: null,
+  },
 ];
 
 // ---------- 金丝雀 ----------

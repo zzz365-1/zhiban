@@ -538,6 +538,16 @@ function cleanLocation(fragment) {
     " " + mm.slice(1, mm.length - 1).trim() + " "
   );
 
+  // 剥掉开头的在和季节这类修饰。
+  // 【为什么需要】真实踩过坑：地点在本班自习教室，结果里前面挂着一个在字，
+  // 抄到日历里读着别扭。冬季学生宿舍安全卫生检查这类写法，
+  // 季节词会和地名粘在一起，也要剥掉，不然拿到的是冬季学生宿舍。
+  s = s.replace(new RegExp("^[ ]*(?:在|于|至|到)[ ]*"), "");
+  s = s.replace(
+    new RegExp("^[ ]*(?:冬季|夏季|春季|秋季|寒假|暑假|本次|本届|本期)[ ]*"),
+    ""
+  );
+
   // 截到“最后一个地点关键词”的结尾。
   // 【为什么不截到第一个】
   // 真实踩过坑：“学生资助管理中心A301办公室”，
@@ -1171,6 +1181,120 @@ function extractAudience(text) {
 
 // ---------- 主入口 ----------
 
+/**
+ * 本地粗分类。只在模型没给分类时兜底。
+ *
+ * 【为什么词表按这个顺序排】助学金评审这类通知里既有评审也有会议，
+ * 学生宿舍安全检查里既有安全也有宿舍，一个词会同时指向两个类别。
+ * 顺序就是优先级，教务和后勤比行政具体，先判具体的，
+ * 行政放最后收底，免得什么都落到行政。
+ */
+const CATEGORY_KEYWORDS = [
+  // 行政里这几个词比教务和后勤都具体，放在最前面单独判。
+  // 【为什么】诚信考试主题班会里有个考试，按教务先判会被判成教务，
+  // 但它其实是要开的班会。助学金奖学金同理，不能因为提到了评审就落到别处。
+  [
+    "行政",
+    ["班会", "青年大学习", "助学金", "奖学金", "资助"],
+  ],
+  [
+    "教务",
+    [
+      "教务",
+      "学籍",
+      "选课",
+      "考试",
+      "成绩",
+      "课表",
+      "教材",
+      "补考",
+      "重修",
+      "毕业",
+      "学分",
+      "培养方案",
+      "实习",
+      "论文",
+      "四六级",
+      "转专业",
+      "评教",
+    ],
+  ],
+  [
+    "后勤",
+    [
+      "宿舍",
+      "寝室",
+      "食堂",
+      "水电",
+      "维修",
+      "保洁",
+      "门禁",
+      "热水",
+      "班车",
+      "体检",
+      "校园卡",
+      "浴室",
+      "空调",
+      "供暖",
+    ],
+  ],
+  [
+    "活动",
+    [
+      "比赛",
+      "大赛",
+      "晚会",
+      "讲座",
+      "运动会",
+      "社团",
+      "文艺",
+      "志愿服务",
+      "征文",
+      "演讲",
+      "歌手",
+      "篮球",
+      "迎新",
+      "辩论",
+      "展演",
+      "报告会",
+    ],
+  ],
+  [
+    "行政",
+    [
+      "报送",
+      "汇总",
+      "名单",
+      "会议",
+      "评审",
+      "资助",
+      "助学金",
+      "奖学金",
+      "团组织",
+      "青年大学习",
+      "档案",
+      "考勤",
+      "班会",
+      "安全",
+      "评优",
+      "公示",
+      "换届",
+    ],
+  ],
+];
+
+function extractCategory(text) {
+  if (!text) return null;
+  for (const pair of CATEGORY_KEYWORDS) {
+    const label = pair[0];
+    const words = pair[1];
+    for (const w of words) {
+      if (text.indexOf(w) !== -1) return label;
+    }
+  }
+  return null;
+}
+
 export function extractNotice(text) {
   const clean = (text || "").split(CRLF).join(LF).trim();
 
@@ -1182,6 +1306,7 @@ export function extractNotice(text) {
     location: null,
     materials: [],
     audience: null,
+    category: null,
   };
 
   if (!clean) return result;
@@ -1195,6 +1320,7 @@ export function extractNotice(text) {
   result.location = extractLocation(clean);
   result.materials = extractMaterials(clean);
   result.audience = extractAudience(clean);
+  result.category = extractCategory(clean);
 
   if (typeof window !== "undefined" && process.env.NODE_ENV !== "production") {
     console.log("[extractNotice] 输入：", clean);

@@ -214,7 +214,11 @@ export function mergeAIResult(ruleResult, aiResult, sourceText) {
 
   const title = aiResult.title || null;
   const summary = aiResult.summary || null;
-  const category = normalizeCategory(aiResult.category);
+  // 分类以模型为准，模型没给就用本地关键词兜底。
+  // 【为什么要兜底】分类长期只有模型会填，无密钥或者本地直接判对的通知
+  // 界面上就显示未分类。评委不配密钥跑一遍，分类这一行是空的，
+  // 说好的无密钥也能完整体验就站不住。
+  const category = normalizeCategory(aiResult.category) || base.category || null;
 
   // ---- 周期与教学周统一拦截 ----
   // 放在第一步合并之后，不管这个值来自本地规则还是模型都过同一道闸。

@@ -134,6 +134,7 @@ npm run test:calendar    # 日历视图
 npm run test:batch       # 批量粘贴
 npm run test:title       # 标题生成
 npm run coverage         # 两条路径的字段覆盖率实测（分母是人工判断有值的条）
+npm run demo:check       # 演示素材自检，演示前先跑一遍防翻车
 npm run validate:ics     # 日历文件导出校验
 ```
 
