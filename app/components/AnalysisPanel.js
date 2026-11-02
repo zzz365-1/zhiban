@@ -32,10 +32,12 @@ function getDisplayText(field, analysis, selectedNotice, draftText) {
     });
   }
   const v = analysis[field.key];
+  // 分类不是从原文抄出来的值，没有分类是正常的，不能跟抽取失败混用一个说法
+  const emptyLabel = field.key === "category" ? "未分类" : "未识别";
   if (Array.isArray(v)) {
-    return v.length === 0 ? "未识别" : v.join("、");
+    return v.length === 0 ? emptyLabel : v.join("、");
   }
-  return v || "未识别";
+  return v || emptyLabel;
 }
 
 function toDraft(field, analysis, selectedNotice, draftText) {
@@ -201,17 +203,6 @@ export default function AnalysisPanel({
               </div>
             )}
 
-            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-              <p className="text-xs font-medium text-slate-400">当前通知</p>
-              <p className="mt-1 text-sm font-medium leading-snug text-slate-800">
-                {getNoticeTitle({
-                  analysis,
-                  title: selectedNotice ? selectedNotice.title : null,
-                  text: selectedNotice ? selectedNotice.text : draftText,
-                })}
-              </p>
-            </div>
-
             <div className="grid grid-cols-2 gap-x-4 gap-y-2">
             {FIELDS.map((field) => {
               const isEditing = editingKey === field.key;
@@ -221,7 +212,7 @@ export default function AnalysisPanel({
                 selectedNotice,
                 draftText
               );
-              const isEmpty = text === "未识别";
+              const isEmpty = text === "未识别" || text === "未分类";
               const showInferredHint =
                 field.key === "deadline" &&
                 analysis._inferredDeadline &&
