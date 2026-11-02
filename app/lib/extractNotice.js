@@ -112,9 +112,72 @@ const DEADLINE_MARKERS = new RegExp(
  * 有截止标志（截止/截至/之前/前…）的日期优先；只有一个候选直接用它；
  * 多个候选又没有截止标志则返回 null——宁可不给，也不要随便挑一个。
  */
+/**
+ * 判断一个日期候选是否位于落款或者发文日期的位置。
+ *
+ * 为什么不能简单按只出现一次就不要来判断。
+ * 请于六月二十日前交表这种只出现一次，但它是真的截止时间，必须保留。
+ * 所以按位置判：日期所在行除了日期只剩单位名或者空，且在文首或文末的少数行内，视为落款。
+ *
+ * 覆盖的落款形态
+ *   文末 单位独占一行 日期独占下一行
+ *   文末 日期与单位同一行
+ *   开头 第一行单位 第二行日期
+ *   开头 日期与单位同一行
+ */
+
+// 单位名常见收尾特征
+function looksLikeIssuerLine(line) {
+  const t = line.trim();
+  if (!t) return true;
+  if (t.length > 25) return false;
+  return new RegExp(
+    "(处|部|办公室|办|学院|院|系|室|中心|公司|学校|大学|党委|团委|学生会|工会|学会|协会|委员会|秘书处|教研室)$"
+  ).test(t);
+}
+
+function isSignatureDate(text, cand) {
+  const lines = text.split(LF);
+  let pos = 0;
+  const lineRanges = [];
+  for (const line of lines) {
+    lineRanges.push({ start: pos, end: pos + line.length, line });
+    pos += line.length + 1;
+  }
+
+  let hit = -1;
+  for (let i = 0; i < lineRanges.length; i++) {
+    const r = lineRanges[i];
+    if (cand.index >= r.start && cand.end <= r.end) {
+      hit = i;
+      break;
+    }
+  }
+  if (hit === -1) return false;
+
+  const line = lineRanges[hit].line;
+  const beforeOnLine = line.slice(0, cand.index - lineRanges[hit].start).trim();
+  const afterOnLine = line.slice(cand.end - lineRanges[hit].start).trim();
+
+  const beforeIsIssuer = beforeOnLine === "" || looksLikeIssuerLine(beforeOnLine);
+  const afterIsIssuer = afterOnLine === "" || looksLikeIssuerLine(afterOnLine);
+  if (!beforeIsIssuer && !afterIsIssuer) return false;
+  if (beforeOnLine !== "" && afterOnLine !== "") {
+    if (!looksLikeIssuerLine(beforeOnLine) && !looksLikeIssuerLine(afterOnLine)) {
+      return false;
+    }
+  }
+
+  // 位置约束：文首前 3 行或者文末后 3 行
+  const lineCount = lines.length;
+  const nearStart = hit <= 2;
+  const nearEnd = hit >= lineCount - 3;
+  return nearStart || nearEnd;
+}
+
 function extractDeadline(text) {
   const candidates = findDateCandidates(text).filter(
-    (c) => !INCOMPLETE_DATE.test(c.text)
+    (c) => !INCOMPLETE_DATE.test(c.text) && !isSignatureDate(text, c)
   );
   if (candidates.length === 0) return null;
   for (const d of candidates) {
@@ -180,6 +243,10 @@ const ACTION_WORDS_FOR_LOCATION = [
   "总结", "评估", "核查", "抽查", "整治", "清理", "维修", "改造",
   "建设", "申报", "报送", "提交", "发放", "领取", "开会",
   "通报", "处理", "规定", "要求", "决定",
+  // 补：设施状态与动作，防止整段被当成地点
+  // 真实踩过坑：图书馆闭馆 被整段当地点，其实闭馆是动作不是地方
+  "闭馆", "闭园", "开放", "开放时间", "装修", "施工", "停业",
+  "整理", "调整", "搬迁", "消毒", "检修", "维护", "保养",
 ];
 
 function hasActionWordInLocation(s) {
@@ -198,12 +265,19 @@ function looksLikeTimeOrDateStart(s) {
 
 function cleanLocation(fragment) {
   if (!fragment) return null;
-  const s = fragment.trim();
+  let s = fragment.trim();
   if (!s) return null;
 
   if (new RegExp("[0-9]+[ ]*月[ ]*[0-9]+[ ]*[日号]").test(s)) return null;
   if (new RegExp("[0-9]+[ ]*[:：][ ]*[0-9]+").test(s)) return null;
   if (looksLikeTimeOrDateStart(s)) return null;
+
+  // 圆括号成对保留内部内容，不再在括号前截断。
+  // 真实踩过坑：学院教学办公室（文科楼208）被截成 学院教学办公室（文科楼，
+  // 门牌号和右括号都丢了。这里把圆括号整体摊平后再清洗。
+  s = s.replace(new RegExp("[（(][^()（）]*[）)]", "g"), (mm) =>
+    " " + mm.slice(1, mm.length - 1).trim() + " "
+  );
 
   // 截到“最后一个地点关键词”的结尾。
   // 【为什么不截到第一个】
@@ -211,6 +285,9 @@ function cleanLocation(fragment) {
   // 如果截到第一个“中心”，后半截“A301办公室”会丢。
   // 用户按“学生资助管理中心”跑一趟，到那儿发现还得再找一间办公室。
   // 所以要找到最靠后的地点关键词，把整个复合地名完整保留。
+  // 所有关键词一起找最后一个（撤回多字与单字分组的写法）。
+  // 【为什么不能分组】单字 厅 室 在 多功能厅 值班室 里就是真正的末位，
+  // 分组会让它被 图书馆 管理中心 这类多字词抢先，把尾巴截掉。
   let bestEnd = -1;
   for (const kw of LOCATION_KEYWORDS) {
     let idx = s.indexOf(kw);
@@ -222,7 +299,27 @@ function cleanLocation(fragment) {
   }
   if (bestEnd === -1) return null;
 
-  const candidate = s.slice(0, bestEnd).trim();
+  // 末位后面若紧跟门牌号或者楼层号，继续延伸吃掉。
+  // 真实踩过坑：文科楼208 在 楼 字处截断，门牌号 208 丢失。
+  // 这里只吃紧贴的第一段门牌号，吃到就停，避免把后面的句子吞进来。
+  let extended = bestEnd;
+  {
+    const rest = s.slice(extended);
+    const m = rest.match(
+      new RegExp("^[ ]*[0-9A-Za-z一二三四五六七八九十百]+[ ]*(?:室|厅|场|馆|号|楼|层|座)?")
+    );
+    if (m && m[0].trim() !== "") {
+      extended += m[0].length;
+    }
+  }
+
+  let candidate = s.slice(0, extended).trim();
+
+  // 动作词判断放在整串上做，不在截断后再判。
+  // 【为什么不先截断再判】真实踩过坑：全校范围内开展安全隐患大排查，
+  // 若先把开展及后面切掉，剩下的全校范围内看着像个正常地点会被提前返回，
+  // 后面真正的保卫处值班室就没机会被找到。整串判含动作词不干净就返回空，
+  // 让上游继续往后找，才是想要的。
   if (candidate.length < 2 || candidate.length > 30) return null;
   if (hasActionWordInLocation(candidate)) return null;
   return candidate;
