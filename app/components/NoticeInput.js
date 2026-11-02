@@ -30,46 +30,23 @@ export default function NoticeInput({
     mode === "single" && showEmptyState && !dismissedEmpty && !value.trim();
 
   return (
-    <section className="flex h-full min-h-0 flex-col bg-slate-50/70 p-5">
-      <div className="mb-3 flex w-fit items-center gap-1 rounded-lg border border-slate-200 bg-white p-1">
-        {MODES.map((m) => (
-          <button
-            key={m.key}
-            type="button"
-            onClick={() => onModeChange(m.key)}
-            className={`rounded-md px-3 py-1 text-xs font-medium transition ${
-              mode === m.key
-                ? "bg-blue-50 text-blue-700"
-                : "text-slate-500 hover:bg-slate-50"
-            }`}
-          >
-            {m.label}
-          </button>
-        ))}
-      </div>
-
-      {warning && warning.shouldWarn && (
-        <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-3">
-          <p className="text-xs leading-relaxed text-amber-800">
-            {warning.message}
-          </p>
-          <div className="mt-2 flex gap-2">
+    <section className="relative flex h-full min-h-0 flex-col bg-slate-50/70 p-5">
+      {renderEmptyState && (
+        <div className="mb-3 flex w-fit items-center gap-1 rounded-lg border border-slate-200 bg-white p-1">
+          {MODES.map((m) => (
             <button
+              key={m.key}
               type="button"
-              onClick={() => onSwitchMode(warning.suggestedMode)}
-              className="rounded-md bg-amber-600 px-3 py-1 text-xs font-medium text-white hover:bg-amber-700"
+              onClick={() => onModeChange(m.key)}
+              className={`rounded-md px-3 py-1 text-xs font-medium transition ${
+                mode === m.key
+                  ? "bg-blue-50 text-blue-700"
+                  : "text-slate-500 hover:bg-slate-50"
+              }`}
             >
-              切换到
-              {warning.suggestedMode === "multi" ? "「多通知」" : "「单条通知」"}
+              {m.label}
             </button>
-            <button
-              type="button"
-              onClick={onDismissWarning}
-              className="rounded-md border border-amber-200 bg-white px-3 py-1 text-xs text-amber-700 hover:bg-amber-50"
-            >
-              保持当前模式
-            </button>
-          </div>
+          ))}
         </div>
       )}
 
@@ -108,18 +85,29 @@ export default function NoticeInput({
 
       {!renderEmptyState && (
         <>
-          <div className="mb-3 flex items-baseline justify-between">
+          <div className="mb-2 flex flex-none items-center justify-between gap-3">
+            <div className="flex w-fit items-center gap-1 rounded-lg border border-slate-200 bg-white p-1">
+              {MODES.map((m) => (
+                <button
+                  key={m.key}
+                  type="button"
+                  onClick={() => onModeChange(m.key)}
+                  className={`rounded-md px-3 py-1 text-xs font-medium transition ${
+                    mode === m.key
+                      ? "bg-blue-50 text-blue-700"
+                      : "text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </div>
             <label
               htmlFor="notice-text"
               className="text-sm font-semibold text-slate-700"
             >
               {mode === "single" ? "通知原文" : "多条通知原文"}
             </label>
-            <span className="text-xs text-slate-400">
-              {mode === "single"
-                ? "粘贴一条通知"
-                : "用空行或「关于……的通知」标题分隔多条"}
-            </span>
           </div>
 
           <textarea
@@ -132,7 +120,7 @@ export default function NoticeInput({
                 : "把多条通知的原文粘贴到这里，用空行或「关于……的通知」标题分隔……"
             }
             rows={6}
-            className="min-h-0 w-full flex-1 resize-none overflow-y-auto rounded-xl border border-slate-200 bg-white p-4 text-sm leading-relaxed text-slate-800 shadow-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+            className="min-h-[160px] w-full flex-1 resize-none overflow-y-auto rounded-xl border border-slate-200 bg-white p-4 text-sm leading-relaxed text-slate-800 shadow-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
           />
         </>
       )}
@@ -161,6 +149,33 @@ export default function NoticeInput({
           >
             {saveLabel}
           </button>
+        </div>
+      )}
+      {/* 模式建议做成浮层，不进 flex 流。
+          以前它是内联卡片，一出现就把输入框挤成一条缝，
+          输入框是 flex-1 加 min-h-0，被挤到几十像素也不报错，看着就像坏了。 */}
+      {warning && warning.shouldWarn && (
+        <div className="absolute bottom-20 right-5 z-30 w-80 rounded-xl border border-amber-200 bg-amber-50 p-3 shadow-lg">
+          <p className="text-xs leading-relaxed text-amber-800">
+            {warning.message}
+          </p>
+          <div className="mt-2 flex gap-2">
+            <button
+              type="button"
+              onClick={() => onSwitchMode(warning.suggestedMode)}
+              className="rounded-md bg-amber-600 px-3 py-1 text-xs font-medium text-white hover:bg-amber-700"
+            >
+              切换到
+              {warning.suggestedMode === "multi" ? "「多通知」" : "「单条通知」"}
+            </button>
+            <button
+              type="button"
+              onClick={onDismissWarning}
+              className="rounded-md border border-amber-200 bg-white px-3 py-1 text-xs text-amber-700 hover:bg-amber-50"
+            >
+              保持当前模式
+            </button>
+          </div>
         </div>
       )}
     </section>
