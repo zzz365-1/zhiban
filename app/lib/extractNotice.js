@@ -25,6 +25,22 @@
 const LF = String.fromCharCode(10);
 const CRLF = String.fromCharCode(13, 10);
 
+// 周期说法与教学周：这些不是某一天要干什么，是按周期重复。
+// 真实踩过坑：原文每周三下午三点在行政楼会议室召开例会，
+// 抽出来是周三，本地换算成一个具体日期，界面显示得跟真截止一模一样，
+// 用户以为那天要办事，实际上每周都开，没有那一天。
+// 教学周第12周依赖校历，硬算出来是猜的，宁可空着。
+// 匹配窗口尾部，也就是日期紧前面就是这些字。
+// 真实踩过坑：抽出来的候选文本是周三，每字在候选区间之外，
+// 第一版靠匹配候选文本开头来挡，永远发不中，
+// 于是每周三前交一路走到末尾只剩一个候选的兜底，把周三返回了，
+// 界面显示一个看起来跟真截止一样的日期。
+// 同一条通知里既有每周三开会又有本月25日前交表时，
+// 只扔掉周三这个候选，本月25日前面的窗口不含每，照常保留。
+const RECURRING_DATE = new RegExp(
+  "(?:每[逢隔个]?|第[0-9一二三四五六七八九十]+[ ]*(?:周|星期))[ ]*$"
+);
+
 // ---------- 日期 ----------
 
 // 周几前缀：长前缀放前面，避免“下”抢在“下下”“下个”之前匹配。
@@ -190,13 +206,28 @@ function isSignatureDate(text, cand) {
 }
 
 function extractDeadline(text) {
-  const candidates = findDateCandidates(text).filter(
-    (c) => !INCOMPLETE_DATE.test(c.text) && !isSignatureDate(text, c)
-  );
+  const candidates = findDateCandidates(text).filter((c) => {
+    if (INCOMPLETE_DATE.test(c.text)) return false;
+    if (isSignatureDate(text, c)) return false;
+    // 看紧邻候选起点前面那几个字，而不是看候选文本本身。
+    const nearBefore = text.slice(Math.max(0, c.index - 6), c.index);
+    if (RECURRING_DATE.test(nearBefore)) return false;
+    return true;
+  });
   if (candidates.length === 0) return null;
   for (const d of candidates) {
     const before = text.slice(Math.max(0, d.index - 15), d.index);
     const after = text.slice(d.end, Math.min(text.length, d.end + 5));
+    // 再看日期紧前面是不是每或者第几周这类周期引导。
+    // 每逢周一前交表会抽出周一，靠这里挡掉，不能当成截止日。
+    const nearBefore = text.slice(Math.max(0, d.index - 6), d.index);
+    if (
+      new RegExp("(每|第[0-9一二三四五六七八九十]+[ ]*(?:周|星期))[ ]*$").test(
+        nearBefore
+      )
+    ) {
+      continue;
+    }
     if (DEADLINE_MARKERS.test(before) || /^ *前/.test(after)) return d.text;
   }
   if (candidates.length === 1) return candidates[0].text;
