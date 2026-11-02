@@ -1,7 +1,6 @@
 "use client";
 
-import { useRef, useEffect, useState } from "react";
-import MultiNoticePanel from "./MultiNoticePanel";
+import { useState } from "react";
 
 const MODES = [
   { key: "single", label: "单条通知" },
@@ -25,16 +24,7 @@ export default function NoticeInput({
   showEmptyState,
   onLoadSamples,
 }) {
-  const textareaRef = useRef(null);
   const [dismissedEmpty, setDismissedEmpty] = useState(false);
-
-  useEffect(() => {
-    const el = textareaRef.current;
-    if (!el) return;
-    el.style.height = "auto";
-    const max = mode === "multi" ? 180 : 1000;
-    el.style.height = Math.min(el.scrollHeight, max) + "px";
-  }, [value, mode]);
 
   const renderEmptyState =
     mode === "single" && showEmptyState && !dismissedEmpty && !value.trim();
@@ -133,7 +123,6 @@ export default function NoticeInput({
           </div>
 
           <textarea
-            ref={textareaRef}
             id="notice-text"
             value={value}
             onChange={(e) => onChange(e.target.value)}
@@ -143,45 +132,35 @@ export default function NoticeInput({
                 : "把多条通知的原文粘贴到这里，用空行或「关于……的通知」标题分隔……"
             }
             rows={6}
-            className="w-full resize-none overflow-y-auto rounded-xl border border-slate-200 bg-white p-4 text-sm leading-relaxed text-slate-800 shadow-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+            className="min-h-0 w-full flex-1 resize-none overflow-y-auto rounded-xl border border-slate-200 bg-white p-4 text-sm leading-relaxed text-slate-800 shadow-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
           />
         </>
       )}
 
-      {mode === "single" && !renderEmptyState && (
-        <>
-          <div className="mt-4 flex items-center justify-end gap-3">
-            <button
-              type="button"
-              onClick={onParse}
-              className="rounded-lg border border-slate-200 bg-white px-5 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 focus:outline-none focus:ring-4 focus:ring-slate-200"
-            >
-              解析
-            </button>
-            <button
-              type="button"
-              onClick={onSave}
-              disabled={!canSave}
-              className={`rounded-lg px-5 py-2.5 text-sm font-medium transition ${
-                canSave
-                  ? "bg-blue-600 text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-4 focus:ring-blue-200"
-                  : "cursor-not-allowed bg-slate-100 text-slate-400"
-              }`}
-            >
-              {saveLabel}
-            </button>
-          </div>
-          <div className="flex-1" aria-hidden="true" />
-        </>
-      )}
-
-      {mode === "multi" && (
-        <div className="mt-4 min-h-0 flex-1">
-          <MultiNoticePanel
-            text={value}
-            existingNotices={existingNotices}
-            onSave={onBatchSave}
-          />
+      {/* 两个模式共用同一排按钮。
+          多通知以前只有一个开始解析，下半区还塞了一块预览面板把输入框压扁。
+          现在预览改成弹窗，按钮和单条保持一致。 */}
+      {!renderEmptyState && (
+        <div className="mt-4 flex flex-none items-center justify-end gap-3">
+          <button
+            type="button"
+            onClick={onParse}
+            className="rounded-lg border border-slate-200 bg-white px-5 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 focus:outline-none focus:ring-4 focus:ring-slate-200"
+          >
+            解析
+          </button>
+          <button
+            type="button"
+            onClick={onSave}
+            disabled={!canSave}
+            className={`rounded-lg px-5 py-2.5 text-sm font-medium transition ${
+              canSave
+                ? "bg-blue-600 text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-4 focus:ring-blue-200"
+                : "cursor-not-allowed bg-slate-100 text-slate-400"
+            }`}
+          >
+            {saveLabel}
+          </button>
         </div>
       )}
     </section>

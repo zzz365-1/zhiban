@@ -8,11 +8,13 @@ import AnalysisPanel from "./components/AnalysisPanel";
 import TodoList from "./components/TodoList";
 import CalendarView from "./components/CalendarView";
 import ShareDialog from "./components/ShareDialog";
+import MultiSplitDialog from "./components/MultiSplitDialog";
+import MultiResultPanel from "./components/MultiResultPanel";
 import { buildDeadlineDate } from "./lib/deadline.js";
 import { getTodoItems } from "./lib/todo.js";
 import { updateNoticeAnalysis } from "./lib/noticeOps.js";
 import { parseOne } from "./lib/parseOne.js";
-import { isDuplicate } from "./lib/splitNotices.js";
+import { isDuplicate, splitNotices } from "./lib/splitNotices.js";
 import { checkModeMismatch } from "./lib/modeGuard.js";
 import { buildSampleNotices } from "./lib/sampleNotices.js";
 
@@ -76,6 +78,14 @@ export default function Home() {
   const [inputMode, setInputMode] = useState("single");
   const [warningCandidate, setWarningCandidate] = useState(null);
   const [warningDismissed, setWarningDismissed] = useState(false);
+  // 多通知的切分确认弹窗与解析结果。
+  // 结果不再放在输入框下面，改到右下那块面板，和单条通知同一个位置。
+  const [splitDialog, setSplitDialog] = useState({
+    open: false,
+    items: [],
+    reason: "",
+  });
+  const [batchResults, setBatchResults] = useState([]);
 
   useEffect(() => {
     try {
@@ -166,14 +176,91 @@ export default function Home() {
       alert("请先粘贴或输入通知原文，再点击解析。");
       return;
     }
-    setParsing(true);
     setSelectedId(null);
+
+    // 多通知先弹窗确认分法，不直接开跑。
+    // 切不出来也要弹，闷声不响用户以为程序坏了。
+    if (inputMode === "multi") {
+      const sp = splitNotices(text);
+      if (!sp.ok || !sp.items || sp.items.length < 2) {
+        setSplitDialog({
+          open: true,
+          items: [],
+          reason: sp.ok
+            ? "只认出一条通知。如果你粘的是好几条，它们之间要空一行。"
+            : sp.reason || "无法可靠分割",
+        });
+        return;
+      }
+      setSplitDialog({ open: true, items: sp.items, reason: "" });
+      return;
+    }
+
+    setParsing(true);
     const result = await parseOne(text);
     setAnalysis(result.analysis);
     setParsing(false);
   }
 
+  async function handleConfirmSplit(kept) {
+    setSplitDialog({ open: false, items: [], reason: "" });
+    setParsing(true);
+    const results = [];
+    for (const t of kept) {
+      if (isDuplicate(t, notices)) {
+        results.push({ text: t, status: "duplicate", analysis: null, errorMsg: "" });
+        continue;
+      }
+      try {
+        const r = await parseOne(t);
+        const src = r.analysis._source;
+        results.push({
+          text: t,
+          status: src === "rule_fallback" ? "fallback" : "success",
+          analysis: r.analysis,
+          errorMsg: r.error ? String(r.error.message || r.error.code || "") : "",
+        });
+      } catch (e) {
+        results.push({
+          text: t,
+          status: "error",
+          analysis: null,
+          errorMsg: String(e?.message || e),
+        });
+      }
+    }
+    setBatchResults(results);
+    setParsing(false);
+  }
+
+  async function handleParseAsSingle() {
+    setSplitDialog({ open: false, items: [], reason: "" });
+    setInputMode("single");
+    setParsing(true);
+    const result = await parseOne(noticeText.trim());
+    setAnalysis(result.analysis);
+    setParsing(false);
+  }
+
+  const batchSavable = batchResults.filter(
+    (it) =>
+      (it.status === "success" || it.status === "fallback") && it.analysis
+  ).length;
+
   function handleSave() {
+    if (inputMode === "multi") {
+      handleBatchSave(
+        batchResults
+          .filter(
+            (it) =>
+              (it.status === "success" || it.status === "fallback") &&
+              it.analysis
+          )
+          .map((it) => ({ text: it.text, analysis: it.analysis }))
+      );
+      setBatchResults([]);
+      return;
+    }
     if (!analysis || selectedId) return;
     const deadlineDate = buildDeadlineDate(analysis.deadline, analysis.time);
     const notice = {
@@ -248,11 +335,22 @@ export default function Home() {
     setAnalysis(null);
   }
 
+  function handleTextChange(text) {
+    setNoticeText(text);
+    // 原文动了，上一次多通知的结果就是旧的，继续显示会误导。
+    if (batchResults.length > 0) setBatchResults([]);
+  }
+
   function handleModeChange(newMode) {
+    // 换模式就是换一种活法，另一个模式的结果不能留着，
+    // 不然上半区写着单条、下半区还挂着三条结果，对不上。
+    setBatchResults([]);
+    setSplitDialog({ open: false, items: [], reason: "" });
     setInputMode(newMode);
   }
 
   function handleSwitchMode(newMode) {
+    setBatchResults([]);
     setInputMode(newMode);
     setWarningDismissed(true);
   }
@@ -306,20 +404,30 @@ export default function Home() {
               <div className="mx-auto flex h-full w-full max-w-4xl flex-col">
                 <NoticeInput
                   value={noticeText}
-                  onChange={setNoticeText}
+                  onChange={handleTextChange}
                   onParse={handleParse}
                   onSave={handleSave}
-                  canSave={Boolean(analysis) && !selectedId && !parsing}
+                  canSave={
+                    inputMode === "multi"
+                      ? batchSavable > 0 && !parsing
+                      : Boolean(analysis) && !selectedId && !parsing
+                  }
                   saveLabel={
-                    selectedId ? "已保存" : parsing ? "解析中…" : "保存到我的通知"
+                    parsing
+                      ? "解析中…"
+                      : inputMode === "multi"
+                      ? batchSavable > 0
+                        ? "保存 " + batchSavable + " 条到我的通知"
+                        : "保存到我的通知"
+                      : selectedId
+                      ? "已保存"
+                      : "保存到我的通知"
                   }
                   mode={inputMode}
                   onModeChange={handleModeChange}
                   warning={warning}
                   onDismissWarning={handleDismissWarning}
                   onSwitchMode={handleSwitchMode}
-                  onBatchSave={handleBatchSave}
-                  existingNotices={notices}
                   showEmptyState={showEmptyState}
                   onLoadSamples={handleLoadSamples}
                 />
@@ -328,16 +436,33 @@ export default function Home() {
           </div>
 
           <div className="min-h-0 flex-1 overflow-hidden">
-            <AnalysisPanel
-              selectedNotice={selectedNotice}
-              analysis={displayAnalysis}
-              draftText={noticeText}
-              onUpdate={handleUpdateAnalysis}
-              onFieldClick={handleHighlightSpan}
-            />
+            {inputMode === "multi" && batchResults.length > 0 ? (
+              <MultiResultPanel items={batchResults} />
+            ) : (
+              <AnalysisPanel
+                selectedNotice={selectedNotice}
+                analysis={displayAnalysis}
+                draftText={noticeText}
+                onUpdate={handleUpdateAnalysis}
+                onFieldClick={handleHighlightSpan}
+              />
+            )}
           </div>
         </div>
       </div>
+
+      {splitDialog.open && (
+        <MultiSplitDialog
+          open={splitDialog.open}
+          items={splitDialog.items}
+          reason={splitDialog.reason}
+          onConfirm={handleConfirmSplit}
+          onCancel={() =>
+            setSplitDialog({ open: false, items: [], reason: "" })
+          }
+          onParseAsSingle={handleParseAsSingle}
+        />
+      )}
 
       {showShare && (
         <ShareDialog
