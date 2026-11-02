@@ -159,14 +159,28 @@ function isSignatureDate(text, cand) {
   const beforeOnLine = line.slice(0, cand.index - lineRanges[hit].start).trim();
   const afterOnLine = line.slice(cand.end - lineRanges[hit].start).trim();
 
+  // 【截止词优先于落款判断】
+  // 真实踩过坑：请于12月31日前将表交到教务处
+  //   日期后面剩 前将表交到教务处，整段以处结尾，被 looksLikeIssuerLine 判成单位名，
+  //   真截止日期被当落款扔掉，界面上日期是空的还不报错。
+  // 所以先看日期前后有没有截止标志，有就一定是真截止，不论位置、不论后面是否像单位名。
+  const aroundForDeadline = line.slice(
+    Math.max(0, cand.index - lineRanges[hit].start - 15),
+    Math.min(line.length, cand.end - lineRanges[hit].start + 15)
+  );
+  if (
+    DEADLINE_MARKERS.test(aroundForDeadline) ||
+    new RegExp("^[ ]*前").test(afterOnLine)
+  ) {
+    return false;
+  }
+
+  // 前后还有实质内容（非单位名）同样不是落款。
+  // 只有这一行除了日期就只剩单位名或者空，才可能是落款。
   const beforeIsIssuer = beforeOnLine === "" || looksLikeIssuerLine(beforeOnLine);
   const afterIsIssuer = afterOnLine === "" || looksLikeIssuerLine(afterOnLine);
-  if (!beforeIsIssuer && !afterIsIssuer) return false;
-  if (beforeOnLine !== "" && afterOnLine !== "") {
-    if (!looksLikeIssuerLine(beforeOnLine) && !looksLikeIssuerLine(afterOnLine)) {
-      return false;
-    }
-  }
+  if (beforeOnLine !== "" && !beforeIsIssuer) return false;
+  if (afterOnLine !== "" && !afterIsIssuer) return false;
 
   // 位置约束：文首前 3 行或者文末后 3 行
   const lineCount = lines.length;
