@@ -397,17 +397,8 @@ export default function Home() {
 
         <div className="flex min-h-0 flex-col">
           <div
-            className="flex min-h-0 flex-col border-b border-slate-200 bg-slate-50"
-            style={{
-              height: "45%",
-              minHeight: "300px",
-              // 装饰底图铺满整块，输入框左右两侧的空白靠它填，
-              // 图是 public 目录下的静态资源，不依赖网络也不需要密钥。
-              backgroundImage: "url('/input-decor.svg')",
-              backgroundSize: "cover",
-              backgroundPosition: "center",
-              backgroundRepeat: "no-repeat",
-            }}
+            className="flex min-h-0 flex-col border-b border-slate-200 bg-slate-50/70"
+            style={{ height: "45%", minHeight: "300px" }}
           >
             <div className="w-full min-h-0 flex-1 overflow-y-auto px-6 py-3">
               <div className="mx-auto flex h-full w-full max-w-4xl flex-col">
