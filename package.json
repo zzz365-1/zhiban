@@ -25,6 +25,7 @@
     "test:sample": "node scripts/test-sample-notices.mjs",
     "test:classify": "node scripts/test-classify.mjs",
     "test:grounding": "node scripts/test-grounding.mjs",
+    "test:locate": "node scripts/test-locate.mjs",
     "validate:ics": "node scripts/validate-ics.mjs --sample",
     "export:ics": "node scripts/export-ics.mjs"
   },

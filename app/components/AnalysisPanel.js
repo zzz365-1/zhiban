@@ -4,6 +4,7 @@ import { useState } from "react";
 import { parseUserDateInput } from "../lib/deadline.js";
 import { getNoticeTitle } from "../lib/shareText.js";
 import { shortParseErrorLabel, describeParseError } from "../lib/aiExtract.js";
+import { findSpan } from "../lib/fieldLocate.js";
 
 const FIELDS = [
   { key: "title", label: "标题", editable: true },
@@ -74,10 +75,13 @@ export default function AnalysisPanel({
   analysis,
   draftText,
   onUpdate,
+  onFieldClick,
 }) {
   const [editingKey, setEditingKey] = useState(null);
   const [draft, setDraft] = useState("");
   const [error, setError] = useState("");
+  const [notFoundKey, setNotFoundKey] = useState(null);
+  const [notFoundMsg, setNotFoundMsg] = useState("");
 
   const sourceInfo = getSourceInfo(analysis);
 
@@ -85,6 +89,24 @@ export default function AnalysisPanel({
   // 手动修正后 _source 变成 manual，横幅自然消失。
   const showErrorBanner =
     analysis && analysis._source === "rule_fallback" && analysis._aiErrorCode;
+
+  function handleLocate(field, isEmpty) {
+    setNotFoundKey(null);
+    setNotFoundMsg("");
+    if (isEmpty) return; // 空字段不高亮、不报错
+
+    const span = findSpan(draftText, field, analysis);
+    if (!span) {
+      setNotFoundKey(field.key);
+      setNotFoundMsg(
+        field.key === "deadline" && analysis._inferredDeadline
+          ? "这个日期是按今天换算出来的，原文里没有对应日期。"
+          : "原文里没找到这段内容，请自行核对。"
+      );
+      return;
+    }
+    if (onFieldClick) onFieldClick(span);
+  }
 
   function startEdit(field) {
     setEditingKey(field.key);
@@ -268,14 +290,20 @@ export default function AnalysisPanel({
                   ) : (
                     <>
                       <div
+                        onClick={() => handleLocate(field, isEmpty)}
                         className={`min-h-[44px] rounded-lg border px-3 py-2.5 text-sm ${
                           isEmpty
                             ? "border-dashed border-slate-200 bg-white text-slate-400"
-                            : "border-slate-200 bg-blue-50/40 text-slate-800"
+                            : "border-slate-200 bg-blue-50/40 text-slate-800 cursor-pointer hover:border-blue-300"
                         }`}
                       >
                         {text}
                       </div>
+                      {notFoundKey === field.key && (
+                        <p className="mt-1 text-[11px] leading-relaxed text-red-500">
+                          {notFoundMsg}
+                        </p>
+                      )}
                       {showInferredHint && (
                         <p className="mt-1 text-[11px] leading-relaxed text-amber-600">
                           原文为相对日期，这里是模型按今天日期换算的结果，仅供参考。

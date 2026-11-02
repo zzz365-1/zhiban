@@ -127,6 +127,22 @@ export default function Home() {
     ? selectedNotice?.analysis ?? null
     : analysis;
 
+  function handleHighlightSpan(span) {
+    const el = document.getElementById("notice-text");
+    if (!el) return;
+    el.focus();
+    el.setSelectionRange(span.start, span.end);
+    // 把选中位置滚动到可见处
+    const lineHeight = 24;
+    const approxTop = Math.max(
+      0,
+      el.value.slice(0, span.start).split(String.fromCharCode(10)).length *
+        lineHeight -
+        el.clientHeight / 2
+    );
+    el.scrollTop = approxTop;
+  }
+
   function handleSelect(id) {
     const target = notices.find((n) => n.id === id);
     if (!target) return;
@@ -313,6 +329,7 @@ export default function Home() {
             analysis={displayAnalysis}
             draftText={noticeText}
             onUpdate={handleUpdateAnalysis}
+            onFieldClick={handleHighlightSpan}
           />
         </div>
       </div>
