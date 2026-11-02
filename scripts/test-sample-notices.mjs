@@ -160,6 +160,31 @@ const CASES = [
 
   // --- 第 6 条有内容 ---
   {
+    name: "035 第 1 条示例带活动日期（双日期那条不能只有截止）",
+    actual: () => {
+      const a = buildSampleNotices(NOW_A)[0].analysis;
+      if (!a.eventDate) return "FAIL: 没有 eventDate";
+      if (a.eventDate === a.deadline) return "FAIL: 活动日期和截止同一天";
+      return true;
+    },
+    expected: true,
+  },
+  {
+    name: "035 第 1 条示例的活动日期是截止日的后一天（防误杀）",
+    actual: () => {
+      const a = buildSampleNotices(NOW_A)[0].analysis;
+      if (!a.eventDate) return "FAIL: 没有 eventDate";
+      // 自己算一遍两天后，不写死字符串，免得哪天改了基准日期用例就假绿。
+      const d = new Date(new Date(NOW_A).getTime() + 2 * 86400000);
+      const expect =
+        d.getFullYear() + "年" + (d.getMonth() + 1) + "月" + d.getDate() + "日";
+      if (a.eventDate !== expect)
+        return "FAIL: 期望 " + expect + " 实际 " + a.eventDate;
+      return true;
+    },
+    expected: true,
+  },
+  {
     name: "第 6 条有地点",
     actual: () => Boolean(buildSampleNotices(NOW_A)[5].analysis.location),
     expected: true,

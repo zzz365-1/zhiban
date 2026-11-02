@@ -69,6 +69,7 @@ export function buildSampleNotices(now) {
   const twoDaysAgoCN = formatDateCN(twoDaysAgo);
 
   const tomorrowFull = formatDateFull(tomorrow);
+  const dayAfterFull = formatDateFull(dayAfter);
   const threeDaysFull = formatDateFull(threeDays);
   const fiveDaysFull = formatDateFull(fiveDays);
   const twoDaysAgoFull = formatDateFull(twoDaysAgo);
@@ -92,6 +93,12 @@ export function buildSampleNotices(now) {
     analysis: {
       deadline: tomorrowFull,
       time: "17:00",
+      // 这条示例的原文里评审会和报送截止不是同一天，
+      // 是双日期通知最典型的样子。示例数据是构造出来的不走解析流程，
+      // 所以这两个字段必须在这里手动带上，不然用户第一眼看到的示例
+      // 就没有活动日期那一行，会以为新字段没做出来。
+      eventDate: dayAfterFull,
+      eventTime: null,
       location: "学生资助管理中心A301办公室",
       materials: ["国家助学金申请表", "家庭经济困难证明", "复印件"],
       audience: "各学院",
