@@ -277,40 +277,10 @@ export default function Home() {
         onOpenShare={() => setShowShare(true)}
       />
 
-      <div className="flex min-h-0 flex-1 flex-col">
-        <div
-          className="flex min-h-0 flex-col border-b border-slate-200 bg-slate-50/70"
-          style={{ height: "35%" }}
-        >
-          <div className="w-full min-h-0 flex-1 overflow-y-auto px-6 py-3">
-            <div className="mx-auto flex h-full w-full max-w-4xl flex-col">
-              <NoticeInput
-                value={noticeText}
-                onChange={setNoticeText}
-                onParse={handleParse}
-                onSave={handleSave}
-                canSave={Boolean(analysis) && !selectedId && !parsing}
-                saveLabel={
-                  selectedId ? "已保存" : parsing ? "解析中…" : "保存到我的通知"
-                }
-                mode={inputMode}
-                onModeChange={handleModeChange}
-                warning={warning}
-                onDismissWarning={handleDismissWarning}
-                onSwitchMode={handleSwitchMode}
-                onBatchSave={handleBatchSave}
-                existingNotices={notices}
-                showEmptyState={showEmptyState}
-                onLoadSamples={handleLoadSamples}
-              />
-            </div>
-          </div>
-        </div>
-
-        <div
-          className="grid min-h-0 flex-1"
-          style={{ gridTemplateColumns: leftWidth + " 1fr" }}
-        >
+      <div
+        className="grid min-h-0 flex-1"
+        style={{ gridTemplateColumns: leftWidth + " 1fr" }}
+      >
           <div className="min-h-0 overflow-hidden">
             {activeTab === "todo" && <TodoList items={todoItems} now={now} />}
             {activeTab === "calendar" && (
@@ -327,13 +297,45 @@ export default function Home() {
             )}
           </div>
 
-          <AnalysisPanel
-            selectedNotice={selectedNotice}
-            analysis={displayAnalysis}
-            draftText={noticeText}
-            onUpdate={handleUpdateAnalysis}
-            onFieldClick={handleHighlightSpan}
-          />
+        <div className="flex min-h-0 flex-col">
+          <div
+            className="flex min-h-0 flex-col border-b border-slate-200 bg-slate-50/70"
+            style={{ height: "35%" }}
+          >
+            <div className="w-full min-h-0 flex-1 overflow-y-auto px-6 py-3">
+              <div className="mx-auto flex h-full w-full max-w-4xl flex-col">
+                <NoticeInput
+                  value={noticeText}
+                  onChange={setNoticeText}
+                  onParse={handleParse}
+                  onSave={handleSave}
+                  canSave={Boolean(analysis) && !selectedId && !parsing}
+                  saveLabel={
+                    selectedId ? "已保存" : parsing ? "解析中…" : "保存到我的通知"
+                  }
+                  mode={inputMode}
+                  onModeChange={handleModeChange}
+                  warning={warning}
+                  onDismissWarning={handleDismissWarning}
+                  onSwitchMode={handleSwitchMode}
+                  onBatchSave={handleBatchSave}
+                  existingNotices={notices}
+                  showEmptyState={showEmptyState}
+                  onLoadSamples={handleLoadSamples}
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="min-h-0 flex-1 overflow-hidden">
+            <AnalysisPanel
+              selectedNotice={selectedNotice}
+              analysis={displayAnalysis}
+              draftText={noticeText}
+              onUpdate={handleUpdateAnalysis}
+              onFieldClick={handleHighlightSpan}
+            />
+          </div>
         </div>
       </div>
 
