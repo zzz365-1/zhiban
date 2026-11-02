@@ -220,7 +220,9 @@ const CASES = [
   { name: "「三月之后」= null", actual: () => resolveOrNull("三月之后", NOW_SUNDAY), expected: null },
   { name: "「一月后」= null", actual: () => resolveOrNull("一月后", NOW_SUNDAY), expected: null },
   { name: "「十二月内」= null", actual: () => resolveOrNull("十二月内", NOW_SUNDAY), expected: null },
-  { name: "「半个月后」= null", actual: () => resolveOrNull("半个月后", NOW_SUNDAY), expected: null },
+  // 019g 起「半个月后」已本地化（15 天），不再是含糊说法，
+  // 因此从「返回 null」改为正向断言。原期望 null 是 019 收官时记录已知边界用的，现已过时。
+  { name: "「半个月后」= 2026年11月16日", actual: () => resolveOrNull("半个月后", NOW_SUNDAY), expected: "2026年11月16日" },
   { name: "「几天后」= null", actual: () => resolveOrNull("几天后", NOW_SUNDAY), expected: null },
   { name: "「数天内」= null", actual: () => resolveOrNull("数天内", NOW_SUNDAY), expected: null },
   { name: "「一百天后」= null", actual: () => resolveOrNull("一百天后", NOW_SUNDAY), expected: null },

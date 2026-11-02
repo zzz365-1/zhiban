@@ -129,6 +129,12 @@ function addMonths(base, n) {
   return new Date(targetY, targetM, targetD);
 }
 
+function isQuantityRelativePhrase(s) {
+  return new RegExp(
+    "^[0-9一二三四五六七八九十两半]+(?:天|日|周|个星期|个月|年|季度)$"
+  ).test(s);
+}
+
 function formatCN(date) {
   return (
     date.getFullYear() +
@@ -146,8 +152,29 @@ function formatCN(date) {
  * @returns {{ date: Date, normalized: string } | null}
  */
 export function resolveRelativeDate(text, now = new Date()) {
-  const s = String(text || "").trim();
+  let s = String(text || "").trim();
   if (!s) return null;
+
+  // 截止后缀预处理：结尾的“之前/以前/前”先摘掉。
+  // 但“三天前/两周前/一个月前”这类数量型说法指过去，不能当未来截止日算，
+  // 所以摘掉后缀后如果是纯数量型短语，直接返回 null，交给模型兜底。
+  const deadlineSuffix = s.match(new RegExp("(之前|以前|前)$"));
+  if (deadlineSuffix) {
+    s = s.slice(0, -deadlineSuffix[0].length).trim();
+
+    // “本周五中午前”去掉“前”后还剩“本周五中午”，把时段词也摘掉，
+    // 让“本周五”继续走下面的星期解析。
+    const timeOfDay = s.match(
+      new RegExp("(凌晨|早上|上午|中午|下午|傍晚|晚上)$")
+    );
+    if (timeOfDay) {
+      s = s.slice(0, -timeOfDay[0].length).trim();
+    }
+
+    if (isQuantityRelativePhrase(s)) {
+      return null;
+    }
+  }
 
   const base = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
@@ -292,6 +319,32 @@ export function resolveRelativeDate(text, now = new Date()) {
       return { date: addMonths(base, n * 12), normalized: formatCN(addMonths(base, n * 12)) };
     }
     return null;
+  }
+
+  // 半个月 / 半年 / 一季度
+  // “半个月”按 15 天算；“半年”按 6 个自然月；“一季度”按 3 个自然月。
+  const mHalfMonth = s.match(
+    new RegExp("^(?:过半个月|半个月(?:之内|以内|内|之后|以后|后))$")
+  );
+  if (mHalfMonth) {
+    const d = addDays(base, 15);
+    return { date: d, normalized: formatCN(d) };
+  }
+
+  const mHalfYear = s.match(
+    new RegExp("^(?:过半年|半年(?:之内|以内|内|之后|以后|后))$")
+  );
+  if (mHalfYear) {
+    const d = addMonths(base, 6);
+    return { date: d, normalized: formatCN(d) };
+  }
+
+  const mQuarter = s.match(
+    new RegExp("^(?:过一季度|一季度(?:之内|以内|内|之后|以后|后))$")
+  );
+  if (mQuarter) {
+    const d = addMonths(base, 3);
+    return { date: d, normalized: formatCN(d) };
   }
 
   // X天内 / X天后 / X日内 / X日后
