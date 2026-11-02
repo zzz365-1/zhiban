@@ -30,7 +30,7 @@ export default function NoticeInput({
     mode === "single" && showEmptyState && !dismissedEmpty && !value.trim();
 
   return (
-    <section className="relative flex h-full min-h-0 flex-col bg-slate-50/70 p-5">
+    <section className="relative flex h-full min-h-0 flex-col p-5">
       {renderEmptyState && (
         <div className="mb-3 flex w-fit items-center gap-1 rounded-lg border border-slate-200 bg-white p-1">
           {MODES.map((m) => (
@@ -120,7 +120,7 @@ export default function NoticeInput({
                 : "把多条通知的原文粘贴到这里，用空行或「关于……的通知」标题分隔……"
             }
             rows={6}
-            className="min-h-[160px] w-full flex-1 resize-none overflow-y-auto rounded-xl border border-slate-200 bg-white p-4 text-sm leading-relaxed text-slate-800 shadow-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+            className="min-h-[160px] w-full flex-1 resize-none overflow-y-auto rounded-xl border border-slate-200 bg-white/90 p-4 text-sm leading-relaxed text-slate-800 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
           />
         </>
       )}
