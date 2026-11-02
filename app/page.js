@@ -261,52 +261,60 @@ export default function Home() {
         onOpenShare={() => setShowShare(true)}
       />
 
-      <div
-        className="grid min-h-0 flex-1"
-        style={{ gridTemplateColumns: leftWidth + " 1fr 280px" }}
-      >
-        <div className="min-h-0 overflow-hidden">
-          {activeTab === "todo" && <TodoList items={todoItems} now={now} />}
-          {activeTab === "calendar" && (
-            <CalendarView notices={filtered} now={now} />
-          )}
-          {activeTab === "all" && (
-            <NoticeList
-              notices={filtered}
-              selectedId={selectedId}
-              onSelect={handleSelect}
-              onDelete={handleDelete}
-              hydrated={hydrated}
-            />
-          )}
+      <div className="flex min-h-0 flex-1 flex-col">
+        <div className="flex min-h-0 flex-1 flex-col border-b border-slate-200 bg-slate-50/70">
+          <div className="w-full min-h-0 flex-1 px-6 py-5">
+            <div className="mx-auto flex h-full w-full max-w-4xl flex-col">
+              <NoticeInput
+                value={noticeText}
+                onChange={setNoticeText}
+                onParse={handleParse}
+                onSave={handleSave}
+                canSave={Boolean(analysis) && !selectedId && !parsing}
+                saveLabel={
+                  selectedId ? "已保存" : parsing ? "解析中…" : "保存到我的通知"
+                }
+                mode={inputMode}
+                onModeChange={handleModeChange}
+                warning={warning}
+                onDismissWarning={handleDismissWarning}
+                onSwitchMode={handleSwitchMode}
+                onBatchSave={handleBatchSave}
+                existingNotices={notices}
+                showEmptyState={showEmptyState}
+                onLoadSamples={handleLoadSamples}
+              />
+            </div>
+          </div>
         </div>
 
-        <NoticeInput
-          value={noticeText}
-          onChange={setNoticeText}
-          onParse={handleParse}
-          onSave={handleSave}
-          canSave={Boolean(analysis) && !selectedId && !parsing}
-          saveLabel={
-            selectedId ? "已保存" : parsing ? "解析中…" : "保存到我的通知"
-          }
-          mode={inputMode}
-          onModeChange={handleModeChange}
-          warning={warning}
-          onDismissWarning={handleDismissWarning}
-          onSwitchMode={handleSwitchMode}
-          onBatchSave={handleBatchSave}
-          existingNotices={notices}
-          showEmptyState={showEmptyState}
-          onLoadSamples={handleLoadSamples}
-        />
+        <div
+          className="grid min-h-0 flex-1"
+          style={{ gridTemplateColumns: leftWidth + " 1fr 1fr" }}
+        >
+          <div className="min-h-0 overflow-hidden">
+            {activeTab === "todo" && <TodoList items={todoItems} now={now} />}
+            {activeTab === "calendar" && (
+              <CalendarView notices={filtered} now={now} />
+            )}
+            {activeTab === "all" && (
+              <NoticeList
+                notices={filtered}
+                selectedId={selectedId}
+                onSelect={handleSelect}
+                onDelete={handleDelete}
+                hydrated={hydrated}
+              />
+            )}
+          </div>
 
-        <AnalysisPanel
-          selectedNotice={selectedNotice}
-          analysis={displayAnalysis}
-          draftText={noticeText}
-          onUpdate={handleUpdateAnalysis}
-        />
+          <AnalysisPanel
+            selectedNotice={selectedNotice}
+            analysis={displayAnalysis}
+            draftText={noticeText}
+            onUpdate={handleUpdateAnalysis}
+          />
+        </div>
       </div>
 
       {showShare && (

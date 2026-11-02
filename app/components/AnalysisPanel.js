@@ -148,17 +148,17 @@ export default function AnalysisPanel({
         )}
       </div>
 
-      <div className="flex-1 space-y-4 overflow-y-auto p-5">
+      <div className="flex-1 overflow-y-auto p-5">
         {!analysis && (
           <p className="text-sm leading-relaxed text-slate-400">
             {selectedNotice
               ? "这条通知还没有解析结果。"
-              : "在左侧选择一条通知，或直接在中间粘贴原文后点击「解析」。"}
+              : "在上方粘贴原文后点击「解析」。"}
           </p>
         )}
 
         {analysis && (
-          <>
+          <div className="space-y-4">
             {showErrorBanner && (
               <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
                 <p className="text-xs font-semibold text-amber-800">
@@ -184,6 +184,7 @@ export default function AnalysisPanel({
               </p>
             </div>
 
+            <div className="grid grid-cols-2 gap-4">
             {FIELDS.map((field) => {
               const isEditing = editingKey === field.key;
               const text = getDisplayText(
@@ -200,7 +201,10 @@ export default function AnalysisPanel({
                 !isEditing;
 
               return (
-                <div key={field.key}>
+                <div
+                  key={field.key}
+                  className={field.isMaterials ? "col-span-2" : ""}
+                >
                   <div className="mb-1.5 flex items-center justify-between">
                     <div className="flex items-center gap-1.5">
                       <p className="text-xs font-semibold text-slate-500">
@@ -282,7 +286,8 @@ export default function AnalysisPanel({
                 </div>
               );
             })}
-          </>
+            </div>
+          </div>
         )}
       </div>
     </aside>
