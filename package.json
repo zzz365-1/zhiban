@@ -27,7 +27,8 @@
     "test:grounding": "node scripts/test-grounding.mjs",
     "test:locate": "node scripts/test-locate.mjs",
     "validate:ics": "node scripts/validate-ics.mjs --sample",
-    "export:ics": "node scripts/export-ics.mjs"
+    "export:ics": "node scripts/export-ics.mjs",
+    "coverage": "node scripts/coverage-report.mjs"
   },
   "dependencies": {
     "next": "16.3.8",
