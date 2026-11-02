@@ -269,6 +269,56 @@ const LOCATION_KEYWORDS = [
   "中心", "广场", "校区", "馆", "厅", "场", "楼", "室",
 ];
 
+// 行政单位名结尾。
+// 【为什么需要】真实踩过坑：无密钥跑一百条真实通知，地点有二十九条是空的，
+// 空的里面绝大多数是行政单位名，报送至教务处考务科，交至财务处收费科，
+// 到保卫处户籍科办理，签字后交回学院教务办，到教材科领取，校医院医保办。
+// 而上面那张表里全是空间名词，一个处科室办部学院系都没有，
+// 整句找不到关键词就直接返回空，等于这一类说法整类抽不到。
+const UNIT_ENDINGS = [
+  "办公室", "会议室", "教务办", "学工办", "学院", "系", "所", "中心", "站",
+  "处", "科", "部", "办",
+];
+
+// 结尾字后面紧跟这些字时，说明它其实不是单位名结尾。
+// 【为什么需要】办会遇到办理和办法和办公和办事，处会遇到处理和处长和处的，
+// 科会遇到科目和科研，部会遇到部门和部分，系会遇到系统和系列。
+// 真实踩过坑：报名系统被当成单位名，凭空造出一个名系出来。
+const UNIT_ENDING_BLOCKED_NEXT = {
+  "办": "理法公事学",
+  "处": "理长于的",
+  "科": "目研学",
+  "部": "门分",
+  "系": "统列数",
+};
+
+// 提交和到达类动作词，只在它们后面找单位名，不整句乱找。
+// 【为什么长词放前面】报送至必须先于报送匹配，否则送到会先把送字吃掉。
+const UNIT_ACTION_SRC =
+  "(?:报送至|报送|交至|交到|交于|交回|送回|报至|报到|提交至|发送至|送至|发至|送到|发送到|到|在|报)";
+
+// 动作词和单位名之间可能夹的过渡成分，要丢掉。
+// 【为什么】真实踩过坑：到所在学院教务办，所在两个字夹在中间。
+const UNIT_LEAD_SKIP = ["所在", "各自", "本", "该", "其", "相关", "对应"];
+
+// 单位名专用的动作词检查子集。
+// 【为什么不直接用 ACTION_WORDS_FOR_LOCATION】那张表里含教育和培训和学习，
+// 而单位名本身就带这些字，教师教育学院会被整条拒掉。
+// 真实踩过坑：在教师教育学院A105举行，因为候选里含教育两个字被判成动作，
+// 结果返回空，门牌号也跟着没了。这里只留与地点真正冲突的那些。
+const UNIT_ACTION_BLOCK = [
+  "开展", "举行", "举办", "排查", "检查", "整治", "施工", "装修",
+  "闭馆", "闭园", "开放", "搬迁", "消毒", "检修", "维修", "改造",
+  "建设", "清理", "整理", "调整", "召开", "参加", "进行",
+];
+
+function hasUnitActionWord(s) {
+  for (const w of UNIT_ACTION_BLOCK) {
+    if (s.indexOf(w) !== -1) return true;
+  }
+  return false;
+}
+
 /**
  * 动作词黑名单。
  *
@@ -411,6 +461,84 @@ function cleanLocation(fragment) {
 }
 
 /**
+ * 从一段候选里按最靠后的单位名结尾切出单位名。
+ * 取最靠后而不是最靠前。
+ * 【为什么不取最靠前】真实踩过坑：教务处考务科如果取到前面的处字，
+ * 只剩教务处，后面的考务科丢了，用户跑到教务处还得再问考务科在哪。
+ */
+function cutUnitName(fragment) {
+  if (!fragment) return null;
+  let s = String(fragment).trim();
+  if (!s) return null;
+
+  // 动作词和单位名之间夹了别的内容时，截掉最后一个介词及它前面那段。
+  // 【为什么】真实踩过坑：报送自查表至保卫处，自查表和至字夹在中间，
+  // 不截的话返回的是自查表至保卫处。
+  const cut = s.search(new RegExp("[至到在向]"));
+  if (cut !== -1) s = s.slice(cut + 1).trim();
+
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const w of UNIT_LEAD_SKIP) {
+      if (s.indexOf(w) === 0) {
+        s = s.slice(w.length).trim();
+        changed = true;
+      }
+    }
+  }
+  if (!s) return null;
+
+  let bestEnd = -1;
+  for (const ending of UNIT_ENDINGS) {
+    let idx = s.indexOf(ending);
+    while (idx !== -1) {
+      const end = idx + ending.length;
+      const next = s.slice(end, end + 1);
+      const blocked = UNIT_ENDING_BLOCKED_NEXT[ending];
+      const isBlocked = blocked && next !== "" && blocked.indexOf(next) !== -1;
+      if (!isBlocked && end > bestEnd) bestEnd = end;
+      idx = s.indexOf(ending, idx + 1);
+    }
+  }
+  if (bestEnd === -1) return null;
+
+  // 结尾字后紧跟门牌号就继续吃掉。
+  // 【为什么】真实踩过坑：在教师教育学院A105举行，
+  // 只给教师教育学院的话门牌号没了，用户还得自己找教室。
+  let extended = bestEnd;
+  {
+    const rest = s.slice(extended);
+    const m = rest.match(new RegExp("^[ ]*[0-9A-Za-z]+"));
+    if (m && m[0].trim() !== "") extended += m[0].length;
+  }
+
+  const candidate = s.slice(0, extended).trim();
+  if (candidate.length < 2 || candidate.length > 30) return null;
+  if (hasUnitActionWord(candidate)) return null;
+  if (looksLikeTimeOrDateStart(candidate)) return null;
+  return candidate;
+}
+
+/**
+ * 在提交和到达类动作词后面找行政单位名。
+ * 每条命中只取动作词之后到标点为止的一小段，再交给 cutUnitName 切，
+ * 避免把整句话都吞进来。
+ */
+function extractUnitLocation(text) {
+  const re = new RegExp(
+    UNIT_ACTION_SRC + "[ ]*([^" + LF + "，。；;：:、]{2,20})",
+    "g"
+  );
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const unit = cutUnitName(m[1]);
+    if (unit) return unit;
+  }
+  return null;
+}
+
+/**
  * 兜底扫描复合地名：X楼/X层/... + 室/厅/场/馆。
  * 覆盖“三楼自习室”“大学生活动中心一层大厅”这类
  * 没有“在/于/地点：”引导语的情况。
@@ -482,6 +610,12 @@ function extractLocation(text) {
 
   const compound = scanCompound(text);
   if (compound) return compound;
+
+  // 行政单位名放在最后兜底。
+  // 【为什么不放在前面】前面几条路径已经能抽到的都不该被抢，
+  // 放在最后就只影响原本返回空的那些，现有用例一条都不会变。
+  const unit = extractUnitLocation(text);
+  if (unit) return unit;
 
   return null;
 }
