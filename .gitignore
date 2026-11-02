@@ -29,5 +29,7 @@ deliverables/recordings/
 # local-only personal reflection notes (never pushed)
 docs/journal/self-reflection-local.md
 
-# AI 返回的待审改动（本地审阅用，不进仓库）
+# AI 往返过程的本地产物（审阅用，不进仓库）
 .ai-out*.md
+.ai-reply*.md
+.ai-thread*.json
