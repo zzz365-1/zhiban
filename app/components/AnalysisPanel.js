@@ -7,13 +7,19 @@ import { shortParseErrorLabel, describeParseError } from "../lib/aiExtract.js";
 import { findSpan } from "../lib/fieldLocate.js";
 
 const FIELDS = [
-  { key: "title", label: "标题", editable: true },
+  { key: "title", label: "标题", editable: true, full: true },
   { key: "deadline", label: "截止日期", editable: true, isDate: true },
   { key: "time", label: "具体时间", editable: true },
   { key: "location", label: "地点", editable: true },
-  { key: "materials", label: "需提交材料", editable: true, isMaterials: true },
+  {
+    key: "materials",
+    label: "需提交材料",
+    editable: true,
+    isMaterials: true,
+    full: true,
+  },
   { key: "audience", label: "面向对象", editable: true },
-  { key: "summary", label: "摘要", ai: true, editable: false },
+  { key: "summary", label: "摘要", ai: true, editable: false, full: true },
   { key: "category", label: "分类", ai: true, editable: false },
 ];
 
@@ -170,7 +176,7 @@ export default function AnalysisPanel({
         )}
       </div>
 
-      <div className="flex-1 overflow-y-auto p-5">
+      <div className="flex-1 overflow-y-auto p-4">
         {!analysis && (
           <p className="text-sm leading-relaxed text-slate-400">
             {selectedNotice
@@ -206,7 +212,7 @@ export default function AnalysisPanel({
               </p>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-2 gap-x-4 gap-y-2">
             {FIELDS.map((field) => {
               const isEditing = editingKey === field.key;
               const text = getDisplayText(
@@ -225,9 +231,9 @@ export default function AnalysisPanel({
               return (
                 <div
                   key={field.key}
-                  className={field.isMaterials ? "col-span-2" : ""}
+                  className={field.full ? "col-span-2" : ""}
                 >
-                  <div className="mb-1.5 flex items-center justify-between">
+                  <div className="group mb-1 flex items-center justify-between">
                     <div className="flex items-center gap-1.5">
                       <p className="text-xs font-semibold text-slate-500">
                         {field.label}
@@ -242,9 +248,18 @@ export default function AnalysisPanel({
                       <button
                         type="button"
                         onClick={() => startEdit(field)}
-                        className="text-[11px] text-blue-500 hover:text-blue-700"
+                        title="编辑"
+                        aria-label="编辑"
+                        className="text-slate-400 opacity-0 transition-opacity hover:text-blue-600 group-hover:opacity-100"
                       >
-                        编辑
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          viewBox="0 0 20 20"
+                          fill="currentColor"
+                          className="h-3.5 w-3.5"
+                        >
+                          <path d="M13.586 3.586a2 2 0 1 1 2.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793 3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
+                        </svg>
                       </button>
                     )}
                   </div>
@@ -291,7 +306,7 @@ export default function AnalysisPanel({
                     <>
                       <div
                         onClick={() => handleLocate(field, isEmpty)}
-                        className={`min-h-[44px] rounded-lg border px-3 py-2.5 text-sm ${
+                        className={`min-h-[38px] rounded-lg border px-3 py-2 text-sm ${
                           isEmpty
                             ? "border-dashed border-slate-200 bg-white text-slate-400"
                             : "border-slate-200 bg-blue-50/40 text-slate-800 cursor-pointer hover:border-blue-300"

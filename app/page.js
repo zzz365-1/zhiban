@@ -278,8 +278,11 @@ export default function Home() {
       />
 
       <div className="flex min-h-0 flex-1 flex-col">
-        <div className="flex min-h-0 flex-1 flex-col border-b border-slate-200 bg-slate-50/70">
-          <div className="w-full min-h-0 flex-1 px-6 py-5">
+        <div
+          className="flex min-h-0 flex-col border-b border-slate-200 bg-slate-50/70"
+          style={{ height: "35%" }}
+        >
+          <div className="w-full min-h-0 flex-1 overflow-y-auto px-6 py-3">
             <div className="mx-auto flex h-full w-full max-w-4xl flex-col">
               <NoticeInput
                 value={noticeText}
@@ -306,7 +309,7 @@ export default function Home() {
 
         <div
           className="grid min-h-0 flex-1"
-          style={{ gridTemplateColumns: leftWidth + " 1fr 1fr" }}
+          style={{ gridTemplateColumns: leftWidth + " 1fr" }}
         >
           <div className="min-h-0 overflow-hidden">
             {activeTab === "todo" && <TodoList items={todoItems} now={now} />}
