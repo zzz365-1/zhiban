@@ -3,6 +3,7 @@
 
 # next.js
 /.next/
+/.next_old_bak/
 /out/
 
 # production
