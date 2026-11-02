@@ -77,8 +77,8 @@ if (threadAbs && existsSync(threadAbs)) {
 
 const continuing = messages !== null;
 
-if (!continuing && (!args.prompt || args.files.length === 0)) {
-  console.error("缺少参数。首次调用需要 --files 至少一个文件，以及 --prompt 一个提示词文件");
+if (!continuing && !args.prompt) {
+  console.error("缺少参数。首次调用至少需要 --prompt 一个提示词文件（--files 可选）");
   console.error("示例: node scripts/ai-patch.mjs --files app/lib/relativeDate.js --prompt prompts/019h-relative-test-coverage.md");
   console.error("续接会话用 --thread 会话文件 --reply 回复文件");
   process.exit(1);
@@ -121,11 +121,12 @@ if (!blockMatch) {
   console.error("## Prompt 标题后面没有找到代码块");
   process.exit(1);
 }
-const promptText = blockMatch[1];
+// 注意：这里必须用外层已声明的变量直接赋值，
+// 若在块内重新 const/let 声明会遮蔽外层变量，导致后面拿到空字符串。
+promptText = blockMatch[1];
 console.log("提示词正文 " + promptText.length + " 字（按标题定位，非按序号取块）");
 
 // ---------- 组装上下文 ----------
-let context = "";
 for (const rel of args.files) {
   const abs = join(root, rel);
   if (!existsSync(abs)) {
@@ -138,7 +139,6 @@ for (const rel of args.files) {
 console.log("上下文合计 " + context.length + " 字，来自 " + args.files.length + " 个文件");
 
 // ---------- 附加本机已核验的事实（避免模型自己另算导致期望值出错） ----------
-let factsText = "";
 if (args.facts) {
   const factsAbs = join(root, args.facts);
   if (!existsSync(factsAbs)) {
@@ -162,9 +162,9 @@ const headers = {
 
 const systemMsg =
   "你是一名协助开发的高校学生项目的对话式 AI。" +
-  "用户会把项目文件原文和需求一起发给你。" +
-  "请严格遵守用户在需求里提出的每一条约束，尤其是只输出改动片段、不要整体重写文件这一条。" +
-  "如果不确定，直接提问，不要臆测项目结构。";
+  "用户可能附上项目文件原文，也可能只提需求不附文件，两种都是正常的，都请正常作答。" +
+  "不要因为没看到文件就认定消息不完整，也不要臆测项目结构。" +
+  "严格遵守用户提出的每一条约束；如果不确定，直接提问。";
 
 let msgs;
 if (continuing) {
@@ -183,8 +183,12 @@ if (continuing) {
     process.exit(1);
   }
 } else {
+  const lead =
+    args.files.length > 0
+      ? "下面是本项目相关文件的当前内容。"
+      : "下面是我这次的需求，这次不需要你看任何项目文件。";
   const userMsg =
-    "下面是本项目相关文件的当前内容。" +
+    lead +
     context +
     factsText +
     "\n\n===== 我这次的需求 =====\n" +
