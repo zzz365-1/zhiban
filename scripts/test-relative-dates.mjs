@@ -58,6 +58,8 @@ const NOW_FEB01 = d(2024, 2, 1);
 const NOW_FEB27_LEAP = d(2024, 2, 27);
 const NOW_FEB27_COMMON = d(2026, 2, 27);
 const NOW_FEB28 = d(2026, 2, 28);
+const NOW_FRIDAY_2026_1106 = d(2026, 11, 6);
+const NOW_DEC31_2026 = d(2026, 12, 31);
 
 const CASES = [
   // --- 今天/明天/后天/大后天/次日/隔天/即日 ---
@@ -267,6 +269,110 @@ const CASES = [
       const r = resolveRelativeDate(rule.deadline, NOW_SUNDAY);
       return r ? r.normalized : null;
     }, expected: "2026年12月1日" },
+
+  // ===== 019h 新增：结尾「之前/前/以前」的将来截止日（应算出具体日期）=====
+  // 期望值来自本机 import app/lib/relativeDate.js 实测，非人工推算。
+  { name: "下周三之前（2026-11-02 周一）", actual: () => resolveOrNull("下周三之前", NOW_MONDAY), expected: "2026年11月11日" },
+  { name: "下周三之前（2026-11-06 周五）", actual: () => resolveOrNull("下周三之前", NOW_FRIDAY_2026_1106), expected: "2026年11月11日" },
+  { name: "下周三之前（2026-12-31 周四）", actual: () => resolveOrNull("下周三之前", NOW_DEC31_2026), expected: "2027年1月6日" },
+  { name: "下周三之前（2026-01-31 周六）", actual: () => resolveOrNull("下周三之前", NOW_JAN31), expected: "2026年2月4日" },
+
+  { name: "下周三前（2026-11-02 周一）", actual: () => resolveOrNull("下周三前", NOW_MONDAY), expected: "2026年11月11日" },
+  { name: "下周三前（2026-11-06 周五）", actual: () => resolveOrNull("下周三前", NOW_FRIDAY_2026_1106), expected: "2026年11月11日" },
+  { name: "下周三前（2026-12-31 周四）", actual: () => resolveOrNull("下周三前", NOW_DEC31_2026), expected: "2027年1月6日" },
+  { name: "下周三前（2026-01-31 周六）", actual: () => resolveOrNull("下周三前", NOW_JAN31), expected: "2026年2月4日" },
+
+  { name: "本周五前（2026-11-02 周一）", actual: () => resolveOrNull("本周五前", NOW_MONDAY), expected: "2026年11月6日" },
+  { name: "本周五前（2026-11-06 周五）", actual: () => resolveOrNull("本周五前", NOW_FRIDAY_2026_1106), expected: "2026年11月6日" },
+  { name: "本周五前（2026-12-31 周四）", actual: () => resolveOrNull("本周五前", NOW_DEC31_2026), expected: "2027年1月1日" },
+  { name: "本周五前（2026-01-31 周六）", actual: () => resolveOrNull("本周五前", NOW_JAN31), expected: "2026年2月6日" },
+
+  { name: "本周五中午前（2026-11-02 周一）", actual: () => resolveOrNull("本周五中午前", NOW_MONDAY), expected: "2026年11月6日" },
+  { name: "本周五中午前（2026-11-06 周五）", actual: () => resolveOrNull("本周五中午前", NOW_FRIDAY_2026_1106), expected: "2026年11月6日" },
+  { name: "本周五中午前（2026-12-31 周四）", actual: () => resolveOrNull("本周五中午前", NOW_DEC31_2026), expected: "2027年1月1日" },
+  { name: "本周五中午前（2026-01-31 周六）", actual: () => resolveOrNull("本周五中午前", NOW_JAN31), expected: "2026年2月6日" },
+
+  { name: "本月底前（2026-11-02 周一）", actual: () => resolveOrNull("本月底前", NOW_MONDAY), expected: "2026年11月30日" },
+  { name: "本月底前（2026-11-06 周五）", actual: () => resolveOrNull("本月底前", NOW_FRIDAY_2026_1106), expected: "2026年11月30日" },
+  { name: "本月底前（2026-12-31 周四）", actual: () => resolveOrNull("本月底前", NOW_DEC31_2026), expected: "2026年12月31日" },
+  { name: "本月底前（2026-01-31 周六）", actual: () => resolveOrNull("本月底前", NOW_JAN31), expected: "2026年1月31日" },
+
+  { name: "大后天之前（2026-11-02 周一）", actual: () => resolveOrNull("大后天之前", NOW_MONDAY), expected: "2026年11月5日" },
+  { name: "大后天之前（2026-11-06 周五）", actual: () => resolveOrNull("大后天之前", NOW_FRIDAY_2026_1106), expected: "2026年11月9日" },
+  { name: "大后天之前（2026-12-31 周四）", actual: () => resolveOrNull("大后天之前", NOW_DEC31_2026), expected: "2027年1月3日" },
+  { name: "大后天之前（2026-01-31 周六）", actual: () => resolveOrNull("大后天之前", NOW_JAN31), expected: "2026年2月3日" },
+
+  // ===== 019h 新增：数量词 + 前/之前/以前（指过去，应返回 null，绝不能当成往后加）=====
+  { name: "三天前（2026-11-02）应 null", actual: () => resolveOrNull("三天前", NOW_MONDAY), expected: null },
+  { name: "三天前（2026-11-06）应 null", actual: () => resolveOrNull("三天前", NOW_FRIDAY_2026_1106), expected: null },
+  { name: "三天前（2026-12-31）应 null", actual: () => resolveOrNull("三天前", NOW_DEC31_2026), expected: null },
+  { name: "三天前（2026-01-31）应 null", actual: () => resolveOrNull("三天前", NOW_JAN31), expected: null },
+
+  { name: "三天之前（2026-11-02）应 null", actual: () => resolveOrNull("三天之前", NOW_MONDAY), expected: null },
+  { name: "三天之前（2026-11-06）应 null", actual: () => resolveOrNull("三天之前", NOW_FRIDAY_2026_1106), expected: null },
+  { name: "三天之前（2026-12-31）应 null", actual: () => resolveOrNull("三天之前", NOW_DEC31_2026), expected: null },
+  { name: "三天之前（2026-01-31）应 null", actual: () => resolveOrNull("三天之前", NOW_JAN31), expected: null },
+
+  { name: "三天以前（2026-11-02）应 null", actual: () => resolveOrNull("三天以前", NOW_MONDAY), expected: null },
+  { name: "三天以前（2026-11-06）应 null", actual: () => resolveOrNull("三天以前", NOW_FRIDAY_2026_1106), expected: null },
+  { name: "三天以前（2026-12-31）应 null", actual: () => resolveOrNull("三天以前", NOW_DEC31_2026), expected: null },
+  { name: "三天以前（2026-01-31）应 null", actual: () => resolveOrNull("三天以前", NOW_JAN31), expected: null },
+
+  { name: "两周前（2026-11-02）应 null", actual: () => resolveOrNull("两周前", NOW_MONDAY), expected: null },
+  { name: "两周前（2026-11-06）应 null", actual: () => resolveOrNull("两周前", NOW_FRIDAY_2026_1106), expected: null },
+  { name: "两周前（2026-12-31）应 null", actual: () => resolveOrNull("两周前", NOW_DEC31_2026), expected: null },
+  { name: "两周前（2026-01-31）应 null", actual: () => resolveOrNull("两周前", NOW_JAN31), expected: null },
+
+  { name: "一个月前（2026-11-02）应 null", actual: () => resolveOrNull("一个月前", NOW_MONDAY), expected: null },
+  { name: "一个月前（2026-11-06）应 null", actual: () => resolveOrNull("一个月前", NOW_FRIDAY_2026_1106), expected: null },
+  { name: "一个月前（2026-12-31）应 null", actual: () => resolveOrNull("一个月前", NOW_DEC31_2026), expected: null },
+  { name: "一个月前（2026-01-31）应 null", actual: () => resolveOrNull("一个月前", NOW_JAN31), expected: null },
+
+  { name: "半年之前（2026-11-02）应 null", actual: () => resolveOrNull("半年之前", NOW_MONDAY), expected: null },
+  { name: "半年之前（2026-11-06）应 null", actual: () => resolveOrNull("半年之前", NOW_FRIDAY_2026_1106), expected: null },
+  { name: "半年之前（2026-12-31）应 null", actual: () => resolveOrNull("半年之前", NOW_DEC31_2026), expected: null },
+  { name: "半年之前（2026-01-31）应 null", actual: () => resolveOrNull("半年之前", NOW_JAN31), expected: null },
+
+  { name: "半个月之前（2026-11-02）应 null", actual: () => resolveOrNull("半个月之前", NOW_MONDAY), expected: null },
+  { name: "半个月之前（2026-11-06）应 null", actual: () => resolveOrNull("半个月之前", NOW_FRIDAY_2026_1106), expected: null },
+  { name: "半个月之前（2026-12-31）应 null", actual: () => resolveOrNull("半个月之前", NOW_DEC31_2026), expected: null },
+  { name: "半个月之前（2026-01-31）应 null", actual: () => resolveOrNull("半个月之前", NOW_JAN31), expected: null },
+
+  { name: "一季度之前（2026-11-02）应 null", actual: () => resolveOrNull("一季度之前", NOW_MONDAY), expected: null },
+  { name: "一季度之前（2026-11-06）应 null", actual: () => resolveOrNull("一季度之前", NOW_FRIDAY_2026_1106), expected: null },
+  { name: "一季度之前（2026-12-31）应 null", actual: () => resolveOrNull("一季度之前", NOW_DEC31_2026), expected: null },
+  { name: "一季度之前（2026-01-31）应 null", actual: () => resolveOrNull("一季度之前", NOW_JAN31), expected: null },
+
+  // ===== 019h 新增：半个月/半年/一季度（内/后/之内）=====
+  { name: "半个月后（2026-11-02）", actual: () => resolveOrNull("半个月后", NOW_MONDAY), expected: "2026年11月17日" },
+  { name: "半个月后（2026-11-06）", actual: () => resolveOrNull("半个月后", NOW_FRIDAY_2026_1106), expected: "2026年11月21日" },
+  { name: "半个月后（2026-12-31）", actual: () => resolveOrNull("半个月后", NOW_DEC31_2026), expected: "2027年1月15日" },
+  { name: "半个月后（2026-01-31）", actual: () => resolveOrNull("半个月后", NOW_JAN31), expected: "2026年2月15日" },
+
+  { name: "半年后（2026-11-02）", actual: () => resolveOrNull("半年后", NOW_MONDAY), expected: "2027年5月2日" },
+  { name: "半年后（2026-11-06）", actual: () => resolveOrNull("半年后", NOW_FRIDAY_2026_1106), expected: "2027年5月6日" },
+  { name: "半年后（2026-12-31）", actual: () => resolveOrNull("半年后", NOW_DEC31_2026), expected: "2027年6月30日" },
+  { name: "半年后（2026-01-31）", actual: () => resolveOrNull("半年后", NOW_JAN31), expected: "2026年7月31日" },
+
+  { name: "一季度后（2026-11-02）", actual: () => resolveOrNull("一季度后", NOW_MONDAY), expected: "2027年2月2日" },
+  { name: "一季度后（2026-11-06）", actual: () => resolveOrNull("一季度后", NOW_FRIDAY_2026_1106), expected: "2027年2月6日" },
+  { name: "一季度后（2026-12-31）", actual: () => resolveOrNull("一季度后", NOW_DEC31_2026), expected: "2027年3月31日" },
+  { name: "一季度后（2026-01-31）", actual: () => resolveOrNull("一季度后", NOW_JAN31), expected: "2026年4月30日" },
+
+  { name: "半年内（2026-11-02）", actual: () => resolveOrNull("半年内", NOW_MONDAY), expected: "2027年5月2日" },
+  { name: "半年内（2026-11-06）", actual: () => resolveOrNull("半年内", NOW_FRIDAY_2026_1106), expected: "2027年5月6日" },
+  { name: "半年内（2026-12-31）", actual: () => resolveOrNull("半年内", NOW_DEC31_2026), expected: "2027年6月30日" },
+  { name: "半年内（2026-01-31）", actual: () => resolveOrNull("半年内", NOW_JAN31), expected: "2026年7月31日" },
+
+  { name: "半个月之内（2026-11-02）", actual: () => resolveOrNull("半个月之内", NOW_MONDAY), expected: "2026年11月17日" },
+  { name: "半个月之内（2026-11-06）", actual: () => resolveOrNull("半个月之内", NOW_FRIDAY_2026_1106), expected: "2026年11月21日" },
+  { name: "半个月之内（2026-12-31）", actual: () => resolveOrNull("半个月之内", NOW_DEC31_2026), expected: "2027年1月15日" },
+  { name: "半个月之内（2026-01-31）", actual: () => resolveOrNull("半个月之内", NOW_JAN31), expected: "2026年2月15日" },
+
+  { name: "一季度内（2026-11-02）", actual: () => resolveOrNull("一季度内", NOW_MONDAY), expected: "2027年2月2日" },
+  { name: "一季度内（2026-11-06）", actual: () => resolveOrNull("一季度内", NOW_FRIDAY_2026_1106), expected: "2027年2月6日" },
+  { name: "一季度内（2026-12-31）", actual: () => resolveOrNull("一季度内", NOW_DEC31_2026), expected: "2027年3月31日" },
+  { name: "一季度内（2026-01-31）", actual: () => resolveOrNull("一季度内", NOW_JAN31), expected: "2026年4月30日" },
 ];
 
 // ---------- 多金丝雀 ----------
@@ -347,6 +453,22 @@ const CANARIES = [
       const targetMondayBased = (3 + 6) % 7;
       const offset = 7 - mondayBased + targetMondayBased;
       const x = new Date(b.getFullYear(), b.getMonth(), b.getDate() + offset);
+      return fmt(x);
+    },
+  },
+  {
+    name: "「三天前」不是往后加 3 天（管 前/之前/以前 指向过去的说法）",
+    // 正确实现：过去说法 → null（不猜、不往将来算）。
+    // 坏实现：把“前”当成“后”，往后加 3 天 → 一定得到具体日期，必然 ≠ null，稳定被抓。
+    baselines: [
+      { label: "2026-11-02(周一)", date: NOW_MONDAY },
+      { label: "2026-11-06(周五)", date: NOW_FRIDAY_2026_1106 },
+      { label: "2026-12-31(周四)", date: NOW_DEC31_2026 },
+      { label: "2026-01-31(周六)", date: NOW_JAN31 },
+    ],
+    correct: (b) => resolveOrNull("三天前", b),
+    broken: (b) => {
+      const x = new Date(b.getFullYear(), b.getMonth(), b.getDate() + 3);
       return fmt(x);
     },
   },
