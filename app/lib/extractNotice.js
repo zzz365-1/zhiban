@@ -277,7 +277,7 @@ const LOCATION_KEYWORDS = [
 // 整句找不到关键词就直接返回空，等于这一类说法整类抽不到。
 const UNIT_ENDINGS = [
   "办公室", "会议室", "教务办", "学工办", "学院", "系", "所", "中心", "站",
-  "处", "科", "部", "办",
+  "处", "科", "部", "办",, "团委"
 ];
 
 // 结尾字后面紧跟这些字时，说明它其实不是单位名结尾。
@@ -595,7 +595,19 @@ function extractLocation(text) {
     if (loc) return enhanceWithCompound(loc, text) || loc;
   }
 
-  const verbRe = new RegExp("(?:在|至|到|前往)[ ]*([^" + LF + "，。；;]{2,40})", "g");
+    // 引导词后面什么都不写也认。
+  // 【为什么】真实踩过坑：公示通知里常写成 地点行政楼A302，
+  // 既没有冒号也没有逗号，只认标点的版本整条匹配不上，门牌号跟着一起丢。
+  // 这里只取更短的一段，并且同样交给清洗去截，免得把后面的整句吞进来。
+  m = text.match(
+    new RegExp("(?:地点|地址|场地|会场)[ ]*([^" + LF + "，。；;：:、]{2,20})")
+  );
+  if (m) {
+    const loc = cleanLocation(m[1]);
+    if (loc) return enhanceWithCompound(loc, text) || loc;
+  }
+
+const verbRe = new RegExp("(?:在|至|到|前往)[ ]*([^" + LF + "，。；;]{2,40})", "g");
   let mm;
   while ((mm = verbRe.exec(text)) !== null) {
     const loc = cleanLocation(mm[1]);
