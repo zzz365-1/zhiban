@@ -68,6 +68,31 @@ function norm(s) {
   return String(s).replace(/\s/g, "");
 }
 
+function checkTime(value, notice) {
+  // 时间字段会被归一化成 24 小时制，比如下午5点变成 17:00。
+  // 这是有意的行为不是编造，所以不能拿子串匹配去判它，
+  // 否则会把十几条正常结果全染红，比不检查还危险（Dec-038）。
+  // 这里把 24 小时制反推回中文说法，再回原文找。
+  const n = norm(value);
+  if (!n) return null;
+  if (norm(notice).includes(n)) return null;
+
+  const m = String(value).trim().match(/^([0-9]{1,2}):([0-9]{2})$/);
+  if (!m) return "原文中找不到";
+  const hh = Number(m[1]);
+  const mm = m[2];
+  const cands = [hh + "点", hh + "时", hh + ":" + mm];
+  const h12 = hh % 12 === 0 ? 12 : hh % 12;
+  if (hh >= 12) cands.push("下午" + h12 + "点", "下午" + h12, "晚上" + h12 + "点");
+  else cands.push("上午" + hh + "点", "上午" + hh, "早上" + hh + "点");
+  if (hh === 12) cands.push("中午" + hh + "点", "中午12点");
+  if (mm !== "00") cands.push(hh + "点" + Number(mm));
+  for (const c of cands) {
+    if (norm(notice).includes(norm(c))) return null;
+  }
+  return "原文中找不到对应时间";
+}
+
 function checkGrounding(value, notice) {
   // 值必须能在原文里找到出处。找不到就是模型编的，或者规则切歪了。
   const n = norm(value);
@@ -117,7 +142,7 @@ for (const it of items) {
     if (g) issues.push("地点：" + g);
   }
   if (a.time) {
-    const g = checkGrounding(a.time, it.notice);
+    const g = checkTime(a.time, it.notice);
     if (g) issues.push("时间：" + g);
   }
   if (a.audience) {
