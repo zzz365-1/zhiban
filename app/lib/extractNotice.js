@@ -796,8 +796,29 @@ const MATERIAL_WORDS = [
 ];
 
 const ACTION_RE = new RegExp(
-  "(提交|报送|上交|递交|携带|准备|附上|提供|填写|打印|带|将|需|须|应|上传)"
+  "(提交|报送|上交|递交|携带|准备|附上|提供|填写|打印|带|将|需|须|应|上传|" +
+    "交到|交至|交于|交给|汇总|填报|领取|补交|回交)"
 );
+
+// 这些词出现在材料前面，说明是在讲内容不是在要东西。
+// 讲座介绍简历制作与面试技巧里的简历是讲座内容，不是要交的材料。
+const MATERIAL_CONTEXT_BLOCK = new RegExp(
+  "(?:介绍|讲解|讲授|分享|涵盖|涉及|内容包括|主题为|主题是|主题|内容)[^，。；；]{0,8}$"
+);
+
+// 材料词后面紧跟这些字，说明它是地名的一部分。
+// 图南楼报告厅里的报告是地点，不是要交的材料。
+const MATERIAL_PLACE_NEXT = [
+  "厅", "馆", "楼", "室", "中心", "处", "部", "会堂", "会",
+];
+
+// 这些表名不是要交的材料，是时间安排一类，不能收。
+const MATERIAL_FORM_BLOCK = new RegExp(
+  "^(?:时间表|日程表|课程表|座位表|排班表|值班表|流程图|代表|表现|表扬|表格说明)$"
+);
+
+// 纸质 电子 手写这类前缀跟材料是一个整体，纸质申请表不能只给申请表。
+const MATERIAL_PREFIX = ["纸质", "电子", "手写", "原件", "双面"];
 
 const QUANTIFIER_CHARS = "支张份个本件套盒把台部只条枚页瓶包块片";
 const NUMBER_CHARS = "0123456789一二三四五六七八九十两几";
@@ -950,12 +971,41 @@ function isHintWordAt(text, word, idx) {
   return false;
 }
 
+// 一个材料词在这一处该不该收。挡掉两种误提：
+// 一是后面跟地点后缀的报告厅，二是前面是介绍讲解这类的讲座内容。
+// 但原文里真有提交交到这类动作时不挡，动作比语境更可靠。
+function isBlockedMaterialAt(text, word, idx) {
+  const after = text.slice(idx + word.length, idx + word.length + 2);
+  for (const suf of MATERIAL_PLACE_NEXT) {
+    if (after.indexOf(suf) === 0) return true;
+  }
+  const before = text.slice(Math.max(0, idx - 15), idx);
+  if (MATERIAL_CONTEXT_BLOCK.test(before)) {
+    const hasRealAction = new RegExp(
+      "(提交|报送|上交|递交|交到|交至|交于|交给|携带|附上|补交|回交|填写|填报)"
+    ).test(before);
+    if (!hasRealAction) return true;
+  }
+  return false;
+}
+
+// 材料词前面紧贴着纸质电子这类限定词时一起收进来。
+function extendMaterialPrefix(text, word, start) {
+  for (const pre of MATERIAL_PREFIX) {
+    const from = start - pre.length;
+    if (from >= 0 && text.slice(from, start) === pre) {
+      return { word: pre + word, start: from };
+    }
+  }
+  return { word, start };
+}
+
 function collectMaterialCandidates(text) {
   const candidates = [];
   for (const word of MATERIAL_WORDS) {
     let idx = text.indexOf(word);
     while (idx !== -1) {
-      if (isHintWordAt(text, word, idx)) {
+      if (isHintWordAt(text, word, idx) || isBlockedMaterialAt(text, word, idx)) {
         idx = text.indexOf(word, idx + 1);
         continue;
       }
@@ -970,12 +1020,53 @@ function collectMaterialCandidates(text) {
         (w) => w !== word && context.includes(w)
       );
       if (hasAction || hasOtherMaterial) {
-        candidates.push({ word, start: idx, end: idx + word.length });
+        const ext = extendMaterialPrefix(text, word, idx);
+        candidates.push({
+          word: ext.word,
+          start: ext.start,
+          end: idx + word.length,
+        });
       }
       idx = text.indexOf(word, idx + 1);
     }
   }
-  return candidates;
+  return candidates.concat(collectFormCandidates(text));
+}
+
+// 体温监测表 签到表 确认表这类词表里没有的表单名。
+// 词表不可能收全所有表名，这里认两到八个字加表单册的写法，
+// 表名在原文里出现的时候要求附近有交带提交这类动作，宁缺勿滥。
+function collectFormCandidates(text) {
+  const found = [];
+  const re = new RegExp("([一-龥]{2,8}?)(表|单|册)(?![格])", "g");
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const word = m[0];
+    const idx = m.index;
+    // 前缀里混进点前将把的厅这类字，说明抓到的是时间和动作，不是表单名。
+    // 丢掉之后从下一个字重新试，别把里面的真表单名一起跳过去。
+    if (
+      new RegExp(
+        "[点前将把的厅了和及或与从向往由给用使是在至到日月年时分]"
+      ).test(m[1])
+    ) {
+      re.lastIndex = idx + 1;
+      continue;
+    }
+    if (MATERIAL_WORDS.includes(word)) continue;
+    if (MATERIAL_FORM_BLOCK.test(word)) continue;
+    if (isBlockedMaterialAt(text, word, idx)) continue;
+    const before = text.slice(Math.max(0, idx - 15), idx);
+    const after = text.slice(
+      idx + word.length,
+      Math.min(text.length, idx + word.length + 8)
+    );
+    const hasAction = ACTION_RE.test(before) || ACTION_RE.test(after);
+    if (!hasAction) continue;
+    const ext = extendMaterialPrefix(text, word, idx);
+    found.push({ word: ext.word, start: ext.start, end: idx + word.length });
+  }
+  return found;
 }
 
 /**
@@ -1283,13 +1374,35 @@ const CATEGORY_KEYWORDS = [
   ],
 ];
 
+// 分类是推断出来的，不是从原文抄来的值。
+// 所以有些词在特定位置不能当证据：行政楼里的行政说的是楼，不是说这是行政类通知。
+const CATEGORY_BLOCK_NEXT = {
+  行政: ["楼", "馆", "处", "大厅", "中心", "楼前", "办公室", "会议室"],
+  活动: ["中心", "室", "厅"],
+  会议: ["室", "厅", "楼", "中心", "场"],
+};
+
+function isCategoryWordAt(text, word, idx) {
+  const block = CATEGORY_BLOCK_NEXT[word];
+  if (!block) return true;
+  const after = text.slice(idx + word.length, idx + word.length + 3);
+  for (const b of block) {
+    if (after.indexOf(b) === 0) return false;
+  }
+  return true;
+}
+
 function extractCategory(text) {
   if (!text) return null;
   for (const pair of CATEGORY_KEYWORDS) {
     const label = pair[0];
     const words = pair[1];
     for (const w of words) {
-      if (text.indexOf(w) !== -1) return label;
+      let idx = text.indexOf(w);
+      while (idx !== -1) {
+        if (isCategoryWordAt(text, w, idx)) return label;
+        idx = text.indexOf(w, idx + 1);
+      }
     }
   }
   return null;

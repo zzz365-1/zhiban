@@ -11,6 +11,7 @@
     "check:regex": "node scripts/check-regex.mjs",
     "check:prompt": "node scripts/check-prompt-style.mjs",
     "test:regex-lint": "node scripts/test-regex-lint.mjs",
+    "test:items": "node scripts/test-items.mjs",
     "test:extract": "node scripts/test-extract.mjs",
     "test:location": "node scripts/test-location.mjs",
     "test:calendar": "node scripts/test-calendar.mjs",
@@ -29,7 +30,8 @@
     "validate:ics": "node scripts/validate-ics.mjs --sample",
     "export:ics": "node scripts/export-ics.mjs",
     "coverage": "node scripts/coverage-report.mjs",
-    "demo:check": "node scripts/demo-check.mjs"
+    "demo:check": "node scripts/demo-check.mjs",
+    "ui:shot": "node scripts/ui-shot.mjs"
   },
   "dependencies": {
     "next": "16.3.8",

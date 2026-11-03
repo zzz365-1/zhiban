@@ -35,20 +35,31 @@ import {
   isFuzzyDate,
 } from "./aiExtract.js";
 import { resolveRelativeDate, normalizeChineseDate } from "./relativeDate.js";
+import { buildItems } from "./noticeItems.js";
 
-export async function parseOne(text) {
+export async function parseOne(text, options) {
+  const opt = options || {};
+  const publishedAt = opt.publishedAt ? new Date(opt.publishedAt) : null;
   const now = new Date();
   // 中文数字写的日期先换成阿拉伯数字，本地规则和模型才认得。
   // 只影响抽取用的文本，界面上展示给用户的原文不动。
   const workText = normalizeChineseDate(text);
   const ruleResult = extractNotice(workText);
 
-  // 本地优先换算相对日期
+  // 相对日期必须有基准。给了发布日期就按发布日期算，
+  // 没给就挂起标待确认，不许默默按今天算，用户会被一个假日期带偏。
   if (ruleResult.deadline && isFuzzyDate(ruleResult.deadline)) {
-    const resolved = resolveRelativeDate(ruleResult.deadline, now);
-    if (resolved) {
-      ruleResult.deadline = resolved.normalized;
-      ruleResult._locallyResolved = true;
+    if (publishedAt) {
+      const resolved = resolveRelativeDate(ruleResult.deadline, publishedAt);
+      if (resolved) {
+        ruleResult.deadline = resolved.normalized;
+        ruleResult._locallyResolved = true;
+        ruleResult._datePending = false;
+      } else {
+        ruleResult._datePending = true;
+      }
+    } else {
+      ruleResult._datePending = true;
     }
   }
 
@@ -63,24 +74,38 @@ export async function parseOne(text) {
   }
 
   if (isRuleResultGood(ruleResult)) {
-    return { analysis: { ...ruleResult, _source: "rule" } };
+    const analysis = { ...ruleResult, _source: "rule" };
+    return {
+      analysis,
+      items: buildItems(text, { publishedAt }),
+    };
   }
 
   try {
     const aiResult = await callAIExtract(workText);
     const merged = mergeAIResult(ruleResult, aiResult, workText);
 
-    // AI 返回的 deadline 如果仍是相对日期，本地再换算一次
+    // AI 返回的 deadline 如果仍是相对日期，同样按发布日期换算，没基准就挂起
     if (merged.deadline && isFuzzyDate(merged.deadline)) {
-      const resolved = resolveRelativeDate(merged.deadline, now);
-      if (resolved) {
-        merged.deadline = resolved.normalized;
-        merged._locallyResolved = true;
-        merged._inferredDeadline = false;
+      if (publishedAt) {
+        const resolved = resolveRelativeDate(merged.deadline, publishedAt);
+        if (resolved) {
+          merged.deadline = resolved.normalized;
+          merged._locallyResolved = true;
+          merged._inferredDeadline = false;
+          merged._datePending = false;
+        } else {
+          merged._datePending = true;
+        }
+      } else {
+        merged._datePending = true;
       }
     }
 
-    return { analysis: merged };
+    return {
+      analysis: merged,
+      items: buildItems(text, { publishedAt }),
+    };
   } catch (e) {
     const code = e?.code || "ai_failed";
     const message = String(e?.message || e);
@@ -91,6 +116,7 @@ export async function parseOne(text) {
         _aiErrorCode: code,
         _aiErrorMessage: message,
       },
+      items: buildItems(text, { publishedAt }),
       error: { code, message },
     };
   }

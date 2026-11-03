@@ -5,6 +5,7 @@ import { parseUserDateInput } from "../lib/deadline.js";
 import { getNoticeTitle } from "../lib/shareText.js";
 import { shortParseErrorLabel, describeParseError } from "../lib/aiExtract.js";
 import { findSpan } from "../lib/fieldLocate.js";
+import ItemsPanel from "./ItemsPanel";
 
 const FIELDS = [
   { key: "title", label: "标题", editable: true, full: true },
@@ -36,7 +37,7 @@ const FIELDS = [
   },
   { key: "audience", label: "面向对象", editable: true },
   { key: "summary", label: "摘要", ai: true, editable: false, full: true },
-  { key: "category", label: "分类", ai: true, editable: false },
+  { key: "category", label: "分类", ai: true, editable: false, inferred: true },
 ];
 
 function getDisplayText(field, analysis, selectedNotice, draftText) {
@@ -48,8 +49,23 @@ function getDisplayText(field, analysis, selectedNotice, draftText) {
     });
   }
   const v = analysis[field.key];
+  // 相对日期缺发布日期基准时不显示换算结果，显示待确认，避免拿今天糊弄过去
+  if (
+    (field.key === "deadline" || field.key === "eventDate") &&
+    analysis._datePending &&
+    v
+  ) {
+    return v + "（待确认发布日期）";
+  }
   // 分类不是从原文抄出来的值，没有分类是正常的，不能跟抽取失败混用一个说法
-  const emptyLabel = field.key === "category" ? "未分类" : "未识别";
+  let emptyLabel = "未识别";
+  if (field.key === "category") emptyLabel = "未分类";
+  // 摘要只有模型会给，本地规则那条路本来就不生成，
+  // 显示未识别会让人以为解析坏了，得说清楚是没走模型。
+  if (field.key === "summary") {
+    const src = analysis ? analysis._source : null;
+    if (src === "rule" || src === "rule_fallback") emptyLabel = "本地识别不生成摘要";
+  }
   if (Array.isArray(v)) {
     return v.length === 0 ? emptyLabel : v.join("、");
   }
@@ -98,8 +114,14 @@ export default function AnalysisPanel({
   selectedNotice,
   analysis,
   draftText,
+  items,
+  stale,
+  publishedAt,
+  onPublishedAtChange,
+  onProgressChange,
   onUpdate,
   onFieldClick,
+  onRetry,
 }) {
   const [editingKey, setEditingKey] = useState(null);
   const [draft, setDraft] = useState("");
@@ -207,6 +229,18 @@ export default function AnalysisPanel({
 
         {analysis && (
           <div className="space-y-4">
+            {stale && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+                <p className="text-xs font-semibold text-amber-800">
+                  内容已修改，待重新解析
+                </p>
+                <p className="mt-1 text-xs leading-relaxed text-amber-700">
+                  原文改过之后，下面这些结果对应的是改之前的文字，已经不能当这次的结果用。
+                  点「解析」重新生成，原文依据也会跟着重算。
+                </p>
+              </div>
+            )}
+
             {showErrorBanner && (
               <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
                 <p className="text-xs font-semibold text-amber-800">
@@ -216,9 +250,27 @@ export default function AnalysisPanel({
                   {describeParseError(analysis._aiErrorCode)}
                 </p>
                 <p className="mt-1.5 text-xs leading-relaxed text-amber-600">
-                  以下结果来自本地规则，可能不完整。可以点「解析」重新试一次。
+                  以下结果来自本地规则，可能不完整。原文已经保留，可以重试。
                 </p>
+                <button
+                  type="button"
+                  onClick={onRetry}
+                  className="mt-2 rounded-md bg-amber-600 px-3 py-1 text-xs font-medium text-white transition hover:bg-amber-700"
+                >
+                  重新解析
+                </button>
               </div>
+            )}
+
+            {items && items.length > 0 && (
+              <ItemsPanel
+                items={items}
+                onLocate={onFieldClick}
+                onProgressChange={onProgressChange || function () {}}
+                publishedAt={publishedAt}
+                onPublishedAtChange={onPublishedAtChange || function () {}}
+                stale={stale}
+              />
             )}
 
             <div className="grid grid-cols-2 gap-x-4 gap-y-2">
@@ -239,6 +291,7 @@ export default function AnalysisPanel({
               const showInferredHint =
                 field.key === "deadline" &&
                 analysis._inferredDeadline &&
+                !analysis._datePending &&
                 !isEmpty &&
                 !isEditing;
 
@@ -255,6 +308,14 @@ export default function AnalysisPanel({
                       {field.ai && (
                         <span className="rounded bg-slate-100 px-1 py-0.5 text-[10px] font-medium text-slate-400">
                           AI
+                        </span>
+                      )}
+                      {field.inferred && (
+                        <span
+                          className="rounded bg-slate-100 px-1 py-0.5 text-[10px] font-medium text-slate-400"
+                          title="分类是程序按关键词推断的，不是原文里抄下来的值，原文依据为空是正常的"
+                        >
+                          推断
                         </span>
                       )}
                     </div>
