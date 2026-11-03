@@ -165,9 +165,14 @@ function findDates(text) {
 // ---------- 时间抽取（复用 evidence.js 的 normalizeTimePhrase） ----------
 
 // 时间候选：中文时间说法 / 二十四小时制
-// 中文：晚上七点 / 下午五点 / 晚上六点半 / 十一点 / 七点半 / 十九点 / 十九点整 等
+// 中文：晚上七点 / 下午五点 / 晚上六点半 / 晚7点 / 晚七点半 / 十一点 / 七点半 / 十九点 / 十九点整 等
+// 【为什么要补一个单独的晚字】
+// 真实踩过坑：因故取消原定11月28日晚7点的决赛，
+// 晚字不在时段词表里，正则只圈到 7点，归一化之后成了 07:00，
+// 晚上七点被当成早上七点，差了十二个小时。
+// 长词必须排在短词前面，晚上和晚间要排在晚前面，否则晚上七点会被拆开。
 const TIME_ITEM_RE = new RegExp(
-  "(上午|下午|中午|晚上|晚间|凌晨|早上|傍晚)?[0-9一二两三四五六七八九十]{1,3}[点:：]([0-9一二两三四五六七八九十]{1,2}分?|半|整)?",
+  "(上午|下午|中午|晚上|晚间|凌晨|早上|傍晚|晚)?[0-9一二两三四五六七八九十]{1,3}[点:：]([0-9一二两三四五六七八九十]{1,2}分?|半|整)?",
   "g"
 );
 
@@ -483,17 +488,29 @@ export function buildNoticePatch(rawText) {
     // 先收集本句产生的变更
     const localChanges = [];
 
-    // 取消
+    // 取消：同一条通知里只保留一个。
+    // 标题句和正文句常各命中一次，标题的「关于取消某某的通知」和
+    // 正文的「因故取消某某」会被收成两条，变更项里带重复项是脏数据。
+    // 保留第一次出现的那条，标题在前正文在后，取第一次稳定。
     if (hasCancel) {
-      localChanges.push({
-        field: "cancel",
-        op: "cancel",
-        from: null,
-        to: null,
-        quote: quote,
-        start: baseStart,
-        end: baseStart + quote.length,
-      });
+      let alreadyHasCancel = false;
+      for (let c = 0; c < changes.length; c++) {
+        if (changes[c] && changes[c].field === "cancel") {
+          alreadyHasCancel = true;
+          break;
+        }
+      }
+      if (!alreadyHasCancel) {
+        localChanges.push({
+          field: "cancel",
+          op: "cancel",
+          from: null,
+          to: null,
+          quote: quote,
+          start: baseStart,
+          end: baseStart + quote.length,
+        });
+      }
     }
 
     // 日期变更
