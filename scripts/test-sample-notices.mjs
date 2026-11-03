@@ -23,6 +23,7 @@ import {
   getSampleCount,
 } from "../app/lib/sampleNotices.js";
 import { formatRemaining, getTodoItems } from "../app/lib/todo.js";
+import { buildRouteEvents } from "../app/lib/routeEvents.js";
 
 function eq(a, b) {
   return a === b;
@@ -139,22 +140,22 @@ const CASES = [
   {
     name: "第 6 条不出现在待办里（5 天 > 3 天）",
     actual: () =>
-      getTodoItems(buildSampleNotices(NOW_A), NOW_A).some(
-        (n) => n.id === "sample_6"
+      getTodoItems(buildRouteEvents(buildSampleNotices(NOW_A)), NOW_A).some(
+        (n) => n.noticeId === "sample_6"
       ),
     expected: false,
   },
   {
     name: "第 2 条仍出现在待办里（3 天）",
     actual: () =>
-      getTodoItems(buildSampleNotices(NOW_A), NOW_A).some(
-        (n) => n.id === "sample_2"
+      getTodoItems(buildRouteEvents(buildSampleNotices(NOW_A)), NOW_A).some(
+        (n) => n.noticeId === "sample_2"
       ),
     expected: true,
   },
   {
     name: "待办里一共 2 条（第 1、2 条）",
-    actual: () => getTodoItems(buildSampleNotices(NOW_A), NOW_A).length,
+    actual: () => getTodoItems(buildRouteEvents(buildSampleNotices(NOW_A)), NOW_A).length,
     expected: 2,
   },
 

@@ -12,6 +12,7 @@ import MultiSplitDialog from "./components/MultiSplitDialog";
 import MultiResultPanel from "./components/MultiResultPanel";
 import { buildDeadlineDate } from "./lib/deadline.js";
 import { getTodoItems } from "./lib/todo.js";
+import { buildRouteEvents } from "./lib/routeEvents.js";
 import { updateNoticeAnalysis } from "./lib/noticeOps.js";
 import { parseOne } from "./lib/parseOne.js";
 import { isDuplicate, splitNotices } from "./lib/splitNotices.js";
@@ -143,7 +144,9 @@ export default function Home() {
 
   const now = Date.now();
   const filtered = filterNotices(notices, searchQuery, categoryFilter);
-  const todoItems = getTodoItems(filtered, now);
+  // 日历和待办都从事项摊平出来的同一份事件走，改了事项两边一起变
+  const routeEvents = buildRouteEvents(filtered);
+  const todoItems = getTodoItems(routeEvents, now);
 
   const selectedNotice = notices.find((n) => n.id === selectedId) ?? null;
   const displayAnalysis = selectedId
@@ -346,8 +349,10 @@ export default function Home() {
           const list = (n.analysis?.items || []).slice();
           if (!list[index]) return n;
           list[index] = { ...list[index], progress: nextProgress };
+          // 事项存两处，最外层和分析结果里都要写，只改一处日历那边不动
           return {
             ...n,
+            items: list,
             analysis: { ...n.analysis, items: list },
           };
         })
@@ -360,6 +365,111 @@ export default function Home() {
         list[index] = { ...list[index], progress: nextProgress };
         return { ...prev, items: list, _source: "manual" };
       });
+    }
+  }
+
+  // 材料勾选：第 index 个事项、第 materialIndex 项材料，ready 置为 true 或 false
+  function handleToggleMaterial(index, materialIndex, ready) {
+    function apply(analysisObj) {
+      if (!analysisObj) return analysisObj;
+      const list = (analysisObj.items || []).slice();
+      if (!list[index]) return analysisObj;
+      const mats = Array.isArray(list[index].materials)
+        ? list[index].materials.slice()
+        : [];
+      if (!mats[materialIndex]) return analysisObj;
+      mats[materialIndex] = { ...mats[materialIndex], ready: Boolean(ready) };
+      list[index] = { ...list[index], materials: mats };
+      return { ...analysisObj, items: list };
+    }
+
+    if (selectedId) {
+      setNotices((prev) =>
+        prev.map((n) =>
+          n.id === selectedId
+            ? (() => {
+                const next = apply(n.analysis);
+                return { ...n, items: next.items, analysis: next };
+              })()
+            : n
+        )
+      );
+    } else {
+      setAnalysis((prev) => (prev ? { ...apply(prev), _source: "manual" } : prev));
+    }
+  }
+
+  // 完成状态切换：第 index 个事项变为 nextProgress
+  function handleToggleComplete(index, nextProgress) {
+    function apply(analysisObj) {
+      if (!analysisObj) return analysisObj;
+      const list = (analysisObj.items || []).slice();
+      if (!list[index]) return analysisObj;
+      list[index] = { ...list[index], progress: nextProgress };
+      return { ...analysisObj, items: list };
+    }
+
+    if (selectedId) {
+      setNotices((prev) =>
+        prev.map((n) =>
+          n.id === selectedId
+            ? (() => {
+                const next = apply(n.analysis);
+                return { ...n, items: next.items, analysis: next };
+              })()
+            : n
+        )
+      );
+    } else {
+      setAnalysis((prev) => (prev ? { ...apply(prev), _source: "manual" } : prev));
+    }
+  }
+
+  // 就地修改事项里的某个字段，目前支持日期和地点。
+  // 改完状态算正常并在这个字段上打手动标记，免得被判成待确认或存疑。
+  function handleEditItemField(index, fieldKey, nextValue) {
+    function apply(analysisObj) {
+      if (!analysisObj) return analysisObj;
+      const list = (analysisObj.items || []).slice();
+      if (!list[index]) return analysisObj;
+      const target = { ...list[index] };
+
+      if (fieldKey === "date") {
+        target.date = nextValue;
+        target.status = {
+          ...(target.status || {}),
+          date: nextValue ? "ok" : "not_mentioned",
+        };
+      } else if (fieldKey === "location") {
+        target.location = nextValue;
+        target.status = {
+          ...(target.status || {}),
+          location: nextValue ? "ok" : "not_mentioned",
+        };
+      }
+
+      target._manualFields = {
+        ...(target._manualFields || {}),
+        [fieldKey]: true,
+      };
+
+      list[index] = target;
+      return { ...analysisObj, items: list };
+    }
+
+    if (selectedId) {
+      setNotices((prev) =>
+        prev.map((n) =>
+          n.id === selectedId
+            ? (() => {
+                const next = apply(n.analysis);
+                return { ...n, items: next.items, analysis: next };
+              })()
+            : n
+        )
+      );
+    } else {
+      setAnalysis((prev) => (prev ? { ...apply(prev), _source: "manual" } : prev));
     }
   }
 
@@ -546,6 +656,9 @@ export default function Home() {
                 onUpdate={handleUpdateAnalysis}
                 onUpdateItem={handleUpdateItem}
                 onFieldClick={handleHighlightSpan}
+                onToggleMaterial={handleToggleMaterial}
+                onToggleComplete={handleToggleComplete}
+                onEditItemField={handleEditItemField}
               />
             )}
           </div>

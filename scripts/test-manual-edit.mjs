@@ -19,6 +19,7 @@
 import { updateNoticeAnalysis } from "../app/lib/noticeOps.js";
 import { parseUserDateInput, getRemainingDays } from "../app/lib/deadline.js";
 import { getTodoItems } from "../app/lib/todo.js";
+import { buildRouteEvents } from "../app/lib/routeEvents.js";
 import { formatDateKey } from "../app/lib/calendar.js";
 
 const NOW = new Date(2026, 9, 31, 10, 0, 0).getTime(); // 2026-10-31 10:00
@@ -131,7 +132,7 @@ const CASES = [
         deadline: "2026年11月1日",
         time: "10:00",
       });
-      return getTodoItems([u], NOW).length;
+      return getTodoItems(buildRouteEvents([u]), NOW).length;
     },
     expected: 1,
   },

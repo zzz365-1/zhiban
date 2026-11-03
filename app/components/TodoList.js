@@ -38,14 +38,14 @@ export default function TodoList({ items, now }) {
         <>
           <ul className="flex-1 overflow-y-auto">
             {(expanded ? items : items.slice(0, COLLAPSED_COUNT)).map((item) => {
-              const remaining = formatRemaining(item.deadlineDate, now);
+              const remaining = formatRemaining(item.ts, now);
               return (
                 <li
-                  key={item.id}
+                  key={item.noticeId + "-" + item.itemIndex}
                   className="border-b border-slate-100 px-4 py-3"
                 >
                   <p className="text-sm leading-snug text-slate-800">
-                    {item.title}
+                    {item.name}
                   </p>
                   <div className="mt-1.5 flex flex-wrap items-center gap-2">
                     <span
@@ -56,7 +56,8 @@ export default function TodoList({ items, now }) {
                       {remaining.text}
                     </span>
                     <span className="text-xs text-slate-400">
-                      {formatDateCN(item.deadlineDate)}
+                      {formatDateCN(item.ts)}
+                      {item.noticeTitle ? " · " + item.noticeTitle : ""}
                     </span>
                   </div>
                 </li>

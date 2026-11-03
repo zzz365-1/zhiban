@@ -3,8 +3,15 @@
 import { useState } from "react";
 import { buildMonthGrid, formatDateKey } from "../lib/calendar";
 import { formatRemaining, formatTimeHM } from "../lib/todo";
+import { buildRouteEvents } from "../lib/routeEvents";
 
 const WEEKDAY_LABELS = ["日", "一", "二", "三", "四", "五", "六"];
+
+const PROGRESS_STYLE = {
+  待办理: "bg-blue-50 text-blue-600",
+  已办理: "bg-slate-100 text-slate-400 line-through",
+  无需办理: "bg-slate-100 text-slate-500",
+};
 
 function dotClass(level) {
   if (level === "red") return "bg-red-500";
@@ -21,13 +28,15 @@ export default function CalendarView({ notices, now }) {
 
   const grid = buildMonthGrid(viewYear, viewMonth);
 
-  // 按日期分组
+  // 按事项摊平成日历事件，再按日期分组。
+  // 办理路线改了日期或者标了完成，这里每次重新摊，跟着一起变。
+  const events = buildRouteEvents(notices);
+
   const byDate = {};
-  for (const n of notices) {
-    if (!n.deadlineDate) continue;
-    const key = formatDateKey(new Date(n.deadlineDate));
+  for (const ev of events) {
+    const key = formatDateKey(ev.date);
     if (!byDate[key]) byDate[key] = [];
-    byDate[key].push(n);
+    byDate[key].push(ev);
   }
 
   const todayKey = formatDateKey(today);
@@ -103,8 +112,8 @@ export default function CalendarView({ notices, now }) {
           const isSelected = key === selectedKey;
 
           let dotLevel = null;
-          for (const item of items) {
-            const lv = formatRemaining(item.deadlineDate, now).level;
+          for (const ev of items) {
+            const lv = formatRemaining(ev.ts, now).level;
             if (lv === "red") {
               dotLevel = "red";
               break;
@@ -150,29 +159,43 @@ export default function CalendarView({ notices, now }) {
           )}
           {selectedItems.length > 0 && (
             <ul className="space-y-2">
-              {selectedItems.map((item) => (
+              {selectedItems.map((ev, i) => (
                 <li
-                  key={item.id}
+                  key={ev.noticeId + "-" + ev.itemIndex + "-" + i}
                   className="rounded-lg border border-slate-200 bg-white p-2.5"
                 >
-                  <p className="text-sm font-medium leading-snug text-slate-800">
-                    {item.title}
-                  </p>
-                  <p className="mt-1 text-xs text-slate-500">
-                    {formatTimeHM(item.deadlineDate)}
-                  </p>
-                  {item.analysis && item.analysis.location && (
+                  <div className="flex items-start justify-between gap-2">
+                    <p
+                      className={`text-sm font-medium leading-snug ${
+                        ev.progress === "已办理"
+                          ? "text-slate-400 line-through"
+                          : "text-slate-800"
+                      }`}
+                    >
+                      {ev.name}
+                    </p>
+                    <span
+                      className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium ${
+                        PROGRESS_STYLE[ev.progress] || PROGRESS_STYLE["待办理"]
+                      }`}
+                    >
+                      {ev.progress}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs text-slate-500">{ev.time}</p>
+                  {ev.location && (
                     <p className="mt-0.5 text-xs text-slate-500">
-                      地点：{item.analysis.location}
+                      地点：{ev.location}
                     </p>
                   )}
-                  {item.analysis &&
-                    item.analysis.materials &&
-                    item.analysis.materials.length > 0 && (
-                      <p className="mt-0.5 text-xs text-slate-500">
-                        材料：{item.analysis.materials.join("、")}
-                      </p>
-                    )}
+                  {ev.materials && ev.materials.length > 0 && (
+                    <p className="mt-0.5 text-xs text-slate-500">
+                      材料：
+                      {ev.materials
+                        .map((m) => (m && m.name ? m.name : m))
+                        .join("、")}
+                    </p>
+                  )}
                 </li>
               ))}
             </ul>

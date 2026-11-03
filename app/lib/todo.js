@@ -37,17 +37,20 @@ export function formatRemaining(deadlineTs, nowTs) {
 }
 
 /**
- * 筛选待办：未过期且剩余自然日 ≤ 3，按截止时间升序。
+ * 筛选待办：按事项筛，不是按整条通知筛。
+ * 已办理和无需办理的不进待办，都办完了还催人是骚扰。
+ * 只留还没到、且在未来三天以内的。
  */
-export function getTodoItems(notices, nowTs) {
-  return notices
-    .filter((n) => {
-      if (!n.deadlineDate) return false;
-      if (n.deadlineDate <= nowTs) return false;
-      const days = getCalendarDayDiff(n.deadlineDate, nowTs);
+export function getTodoItems(events, nowTs) {
+  return events
+    .filter((ev) => {
+      if (ev.progress === "已办理" || ev.progress === "无需办理") return false;
+      if (typeof ev.ts !== "number") return false;
+      if (ev.ts <= nowTs) return false;
+      const days = getCalendarDayDiff(ev.ts, nowTs);
       return days >= 0 && days <= 3;
     })
-    .sort((a, b) => a.deadlineDate - b.deadlineDate);
+    .sort((a, b) => a.ts - b.ts);
 }
 
 export function formatDateCN(ts) {

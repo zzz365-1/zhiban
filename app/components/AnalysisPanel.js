@@ -106,6 +106,9 @@ export default function AnalysisPanel({
   onUpdate,
   onUpdateItem,
   onFieldClick,
+  onToggleMaterial,
+  onToggleComplete,
+  onEditItemField,
 }) {
   const [editingKey, setEditingKey] = useState(null);
   const [draft, setDraft] = useState("");
@@ -374,6 +377,17 @@ export default function AnalysisPanel({
                 }}
                 onLocate={onFieldClick}
                 manual={analysis._source === "manual"}
+                onMaterialToggle={(index, materialIndex, ready) => {
+                  if (onToggleMaterial) {
+                    onToggleMaterial(index, materialIndex, ready);
+                  }
+                }}
+                onCompleteToggle={(index, nextProgress) => {
+                  if (onToggleComplete) onToggleComplete(index, nextProgress);
+                }}
+                onEditField={(index, fieldKey, nextValue) => {
+                  if (onEditItemField) onEditItemField(index, fieldKey, nextValue);
+                }}
               />
             </div>
             </div>

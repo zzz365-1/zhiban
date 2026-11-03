@@ -6,7 +6,7 @@
  * 老数据迁移有没有把原有字段弄丢。
  */
 
-import { buildItems, applyItemPatch } from "../app/lib/noticeItems.js";
+import { buildItems, applyItemPatch, normalizeMaterials } from "../app/lib/noticeItems.js";
 import { migrateNotice, migrateNotices } from "../app/lib/noticeMigrate.js";
 import { checkDuplicate, dedupeItems } from "../app/lib/dedupe.js";
 import { extractNotice } from "../app/lib/extractNotice.js";
@@ -38,6 +38,21 @@ function itemsOf(text, opts) {
   return buildItems(text, opts || {});
 }
 
+// 材料从第 2 轮起是对象数组，每项带 名字 与 准备好了没有 两个字段。
+// 这里把它压成 名字加冒号加状态 的形式，期望值才能同时盯住这两样。
+function materialsBrief(item) {
+  const list = Array.isArray(item.materials) ? item.materials : [];
+  if (list.length === 0) return "-";
+  return list
+    .map((m) => {
+      if (m == null) return "坏项";
+      const name = typeof m === "object" ? m.name : String(m);
+      const ready = typeof m === "object" ? m.ready === true : false;
+      return name + ":" + (ready ? "已备" : "未备");
+    })
+    .join("+");
+}
+
 function brief(item) {
   return [
     item.name,
@@ -45,7 +60,7 @@ function brief(item) {
     item.date,
     item.time || "-",
     item.location || "-",
-    (item.materials || []).join("+") || "-",
+    materialsBrief(item),
   ].join("|");
 }
 
@@ -59,7 +74,7 @@ const CASES = [
   {
     name: "案例1 事项一 提交纸质申请表 截止11月5日17点 学生工作处A302办公室",
     actual: () => brief(itemsOf(CASE1)[0]),
-    expected: "提交纸质申请表|deadline|11月5日|17:00|学生工作处A302办公室|纸质申请表",
+    expected: "提交纸质申请表|deadline|11月5日|17:00|学生工作处A302办公室|纸质申请表:未备",
   },
   {
     name: "案例1 事项二 参加评审会 开始11月8日19点 行政楼A302会议室",
@@ -89,7 +104,7 @@ const CASES = [
   {
     name: "案例2 事项一 提交报名表 截止11月10日17点 团委办公室",
     actual: () => brief(itemsOf(CASE2)[0]),
-    expected: "提交报名表|deadline|11月10日|17:00|团委办公室|报名表",
+    expected: "提交报名表|deadline|11月10日|17:00|团委办公室|报名表:未备",
   },
   {
     name: "案例2 初赛开始11月15日18:30 大礼堂",
@@ -124,9 +139,9 @@ const CASES = [
 
   // ---------- 案例4 ----------
   {
-    name: "案例4 材料是体温监测表",
-    actual: () => (itemsOf(CASE4)[0].materials || []).join(""),
-    expected: "体温监测表",
+    name: "案例4 材料是体温监测表且默认没准备好",
+    actual: () => materialsBrief(itemsOf(CASE4)[0]),
+    expected: "体温监测表:未备",
   },
   {
     name: "案例4 地点是学院学工办B203",
@@ -366,6 +381,86 @@ const CASES = [
       return dedupeItems(dup).length;
     },
     expected: 2,
+  },
+
+  // ---------- 第2轮 办理路线 ----------
+  {
+    name: "手续事项的建议每一项来源都是系统建议",
+    actual: () => {
+      const list = itemsOf(CASE1)[0].suggestions || [];
+      if (list.length === 0) return "空";
+      return list.map((s) => s.source).join("+");
+    },
+    expected: "system+system+system",
+  },
+  {
+    name: "活动事项的建议每一项来源都是系统建议",
+    actual: () => {
+      const list = itemsOf(CASE1)[1].suggestions || [];
+      if (list.length === 0) return "空";
+      return list.map((s) => s.source).join("+");
+    },
+    expected: "system+system",
+  },
+  {
+    name: "活动事项的建议里不出现准备材料这类话",
+    actual: () => {
+      const list = itemsOf(CASE1)[1].suggestions || [];
+      const hit = list.filter((s) => String(s.text).indexOf("材料") !== -1);
+      return hit.length;
+    },
+    expected: 0,
+  },
+  {
+    name: "建议不是从原文里抄来的句子",
+    actual: () => {
+      const list = itemsOf(CASE1);
+      let copied = 0;
+      for (const item of list) {
+        for (const s of item.suggestions || []) {
+          // 建议里只要夹着原文连续八个字以上，就当成抄来的
+          for (let i = 0; i + 8 <= CASE1.length; i++) {
+            const frag = CASE1.slice(i, i + 8);
+            if (String(s.text).indexOf(frag) !== -1) {
+              copied++;
+              break;
+            }
+          }
+        }
+      }
+      return copied;
+    },
+    expected: 0,
+  },
+  {
+    name: "事项里没有先后依赖字段",
+    actual: () => {
+      const it = itemsOf(CASE1)[0];
+      const keys = Object.keys(it).join(",");
+      const bad = ["depend", "prerequisite", "requires", "blockedBy", "prev", "next"];
+      const hit = bad.filter((k) => keys.toLowerCase().indexOf(k) !== -1);
+      return hit.join("+");
+    },
+    expected: "",
+  },
+  {
+    name: "老数据里的材料字符串整理成带标记的对象",
+    actual: () => {
+      const out = normalizeMaterials(["体温监测表", "一寸照片"]);
+      return out.map((m) => m.name + ":" + (m.ready ? "已备" : "未备")).join("+");
+    },
+    expected: "体温监测表:未备+一寸照片:未备",
+  },
+  {
+    name: "已经勾过的材料整理完不能丢掉勾",
+    actual: () => {
+      const out = normalizeMaterials([
+        { name: "体温监测表", ready: true },
+        { name: "一寸照片" },
+      ]);
+      return out.map((m) => m.name + ":" + (m.ready ? "已备" : "未备")).join("+");
+    },
+    expected: "体温监测表:已备+一寸照片:未备",
   },
 ];
 

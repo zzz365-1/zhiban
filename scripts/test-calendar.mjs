@@ -24,6 +24,7 @@ import {
   formatRemaining,
   getTodoItems,
 } from "../app/lib/todo.js";
+import { buildRouteEvents } from "../app/lib/routeEvents.js";
 
 // ---------- 断言 ----------
 
@@ -157,13 +158,13 @@ const CASES = [
   {
     name: "三天内包含",
     actual: () =>
-      getTodoItems(
+      getTodoItems(buildRouteEvents(
         [
           {
             id: "a",
             deadlineDate: new Date(2026, 10, 2, 17, 0, 0).getTime(),
           },
-        ],
+        ]),
         NOW
       ).length,
     expected: 1,
@@ -171,13 +172,13 @@ const CASES = [
   {
     name: "四天后不包含",
     actual: () =>
-      getTodoItems(
+      getTodoItems(buildRouteEvents(
         [
           {
             id: "a",
             deadlineDate: new Date(2026, 10, 4, 17, 0, 0).getTime(),
           },
-        ],
+        ]),
         NOW
       ).length,
     expected: 0,
@@ -185,13 +186,13 @@ const CASES = [
   {
     name: "已过期不包含",
     actual: () =>
-      getTodoItems(
+      getTodoItems(buildRouteEvents(
         [
           {
             id: "a",
             deadlineDate: new Date(2026, 9, 30, 17, 0, 0).getTime(),
           },
-        ],
+        ]),
         NOW
       ).length,
     expected: 0,
@@ -199,13 +200,13 @@ const CASES = [
   {
     name: "无截止日期不包含",
     actual: () =>
-      getTodoItems([{ id: "a", deadlineDate: null }], NOW).length,
+      getTodoItems(buildRouteEvents([{ id: "a", deadlineDate: null }]), NOW).length,
     expected: 0,
   },
   {
     name: "排序：越急越前",
     actual: () =>
-      getTodoItems(
+      getTodoItems(buildRouteEvents(
         [
           {
             id: "late",
@@ -219,10 +220,10 @@ const CASES = [
             id: "mid",
             deadlineDate: new Date(2026, 10, 2, 12, 0, 0).getTime(),
           },
-        ],
+        ]),
         NOW
       )
-        .map((n) => n.id)
+        .map((n) => n.noticeId)
         .join(","),
     expected: "soon,mid,late",
   },

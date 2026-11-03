@@ -154,6 +154,89 @@ function pickEventNoun(text) {
   return null;
 }
 
+// ---------- 材料归一化 ----------
+
+// 统一把材料整理成 [{ name, ready }]：
+// - 字符串数组 → 每项补 ready:false
+// - 对象数组   → 保留 name，ready 缺省补 false
+// - 单项字符串 → 包成一项
+// 不合法的项（无名字）丢弃。生成事项、读老数据都用这一个函数。
+export function normalizeMaterials(materials) {
+  const out = [];
+  if (materials == null) return out;
+
+  const list = Array.isArray(materials) ? materials : [materials];
+  for (let i = 0; i < list.length; i++) {
+    const m = list[i];
+    if (m == null) continue;
+
+    if (typeof m === "string") {
+      const name = m.trim();
+      if (!name) continue;
+      out.push({ name: name, ready: false });
+      continue;
+    }
+
+    if (typeof m === "object") {
+      const name = m.name == null ? "" : String(m.name).trim();
+      if (!name) continue;
+      out.push({ name: name, ready: m.ready === true });
+      continue;
+    }
+
+    // 数字等其他类型：当作名字
+    const name = String(m).trim();
+    if (!name) continue;
+    out.push({ name: name, ready: false });
+  }
+  return out;
+}
+
+// ---------- 系统建议 ----------
+
+export const SUGGESTION_SOURCE_SYSTEM = "system";
+
+// 只用通用模板，绝不从原文取句子。
+// 手续类：提醒提前把材料准备好、核对要求、别卡截止点。
+// 活动类：提醒提前到场签到，明确不提准备材料。
+function buildSuggestions(isSubmit, materials) {
+  const out = [];
+  const mats = Array.isArray(materials) ? materials : [];
+
+  if (isSubmit) {
+    if (mats.length > 0) {
+      out.push({
+        text: "提前把" + mats[0].name + "填写或准备好",
+        source: SUGGESTION_SOURCE_SYSTEM,
+      });
+    } else {
+      out.push({
+        text: "提前把要提交的内容准备好",
+        source: SUGGESTION_SOURCE_SYSTEM,
+      });
+    }
+    out.push({
+      text: "对照通知再核对一遍材料和份数要求",
+      source: SUGGESTION_SOURCE_SYSTEM,
+    });
+    out.push({
+      text: "尽量提前办理，别卡在截止时间",
+      source: SUGGESTION_SOURCE_SYSTEM,
+    });
+  } else {
+    out.push({
+      text: "提前十分钟到场",
+      source: SUGGESTION_SOURCE_SYSTEM,
+    });
+    out.push({
+      text: "到场后按现场要求签到",
+      source: SUGGESTION_SOURCE_SYSTEM,
+    });
+  }
+
+  return out;
+}
+
 function buildName(isSubmit, materials, sentenceText, kind) {
   const text = sentenceText == null ? "" : String(sentenceText);
 
@@ -358,11 +441,13 @@ export function buildItems(rawText, options) {
     // 地点：以抽取值为准
     let location = locRaw || null;
 
-    // 材料：仅手续类
+    // 材料：仅手续类，统一归一化为对象数组
     let materials = [];
-    if (isSubmit && matsRaw.length > 0) {
-      materials = matsRaw.slice();
+    if (isSubmit) {
+      materials = normalizeMaterials(matsRaw);
     }
+
+    const suggestions = buildSuggestions(isSubmit, materials);
 
     // 面向对象
     let audience = null;
@@ -372,7 +457,12 @@ export function buildItems(rawText, options) {
       audience = notice.audience;
     }
 
-    const name = buildName(isSubmit, materials, sentence.text, kind);
+    const name = buildName(
+      isSubmit,
+      materials.map((m) => m.name),
+      sentence.text,
+      kind
+    );
 
     const item = {
       key: buildKey(name, resolvedDate.date, time, seq),
@@ -386,6 +476,7 @@ export function buildItems(rawText, options) {
       time: time,
       location: location,
       materials: materials,
+      suggestions: suggestions,
       audience: audience,
       progress: "待办理",
       dateStatus: resolvedDate.dateStatus,
@@ -518,6 +609,7 @@ export function validateItems(items, text) {
       if (item.kind === "event" || item.kind === "activity") {
         item.status.materials = "not_applicable";
       } else if (Array.isArray(item.materials) && item.materials.length > 0) {
+        item.materials = normalizeMaterials(item.materials);
         if (
           item.status.materials !== "failed" &&
           !Array.isArray(fields.materials)
@@ -630,13 +722,10 @@ export function applyItemPatch(items, patch) {
       target.materials = [];
       target.status.materials =
         target.kind === "event" ? "not_applicable" : "not_mentioned";
-    } else if (Array.isArray(p.materials)) {
-      target.materials = p.materials.map((m) => String(m));
+    } else {
+      target.materials = normalizeMaterials(p.materials);
       target.status.materials =
         target.materials.length > 0 ? "ok" : "not_mentioned";
-    } else {
-      target.materials = [String(p.materials)];
-      target.status.materials = "ok";
     }
   }
 
