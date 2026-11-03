@@ -23,6 +23,14 @@ import DuplicateDialog from "./components/DuplicateDialog";
 import { buildItems } from "./lib/noticeItems.js";
 import { migrateNotice } from "./lib/noticeMigrate.js";
 import { checkDuplicate } from "./lib/dedupe.js";
+import PatchLinkDialog from "./components/PatchLinkDialog";
+import PatchReviewDialog from "./components/PatchReviewDialog";
+import {
+  buildNoticePatch,
+  matchPatchTarget,
+  buildPatchReview,
+  applyPatch,
+} from "./lib/noticePatch.js";
 
 const STORAGE_KEY = "zhiban.notices.v1";
 
@@ -100,6 +108,14 @@ export default function Home() {
   // 用户选择仍然导入后放行，直到保存完成才清掉，
   // 否则保存时又被查一次重复，陷入循环
   const [allowDuplicate, setAllowDuplicate] = useState(false);
+
+  // 补充通知流程：抽取结果、当前步骤、选中的原通知与事项、对比结果、提醒
+  const [patchDraft, setPatchDraft] = useState(null);
+  const [patchStep, setPatchStep] = useState("closed");
+  const [patchNoticeId, setPatchNoticeId] = useState(null);
+  const [patchIndexes, setPatchIndexes] = useState([]);
+  const [patchReview, setPatchReview] = useState(null);
+  const [patchAlerts, setPatchAlerts] = useState([]);
 
   useEffect(() => {
     try {
@@ -200,6 +216,20 @@ export default function Home() {
       return;
     }
     setSelectedId(null);
+
+    // 补充通知：先跑抽取，命中就转去关联原通知，不走普通解析也不查重
+    if (inputMode !== "multi") {
+      const patch = buildNoticePatch(text);
+      if (patch && patch.isPatch && notices.length > 0) {
+        setPatchDraft(patch);
+        setPatchStep("link");
+        setPatchNoticeId(null);
+        setPatchIndexes([]);
+        setPatchReview(null);
+        setPatchAlerts([]);
+        return;
+      }
+    }
 
     // 单条模式先查重：命中就弹窗，别直接开跑
     if (inputMode !== "multi" && !allowDuplicate) {
@@ -555,6 +585,66 @@ export default function Home() {
     setWarningDismissed(true);
   }
 
+  function handlePatchPickNotice(noticeId, indexes) {
+    const notice = notices.find((n) => n.id === noticeId);
+    if (!notice) return;
+    const items = notice.analysis?.items || notice.items || [];
+    // 兜底：传进来是空数组就用这条通知自己再算一次匹配下标
+    let useIndexes = Array.isArray(indexes) ? indexes : [];
+    if (useIndexes.length === 0 && patchDraft) {
+      const m = matchPatchTarget(items, patchDraft) || {};
+      useIndexes = Array.isArray(m.indexes) ? m.indexes : [];
+    }
+    const review = buildPatchReview(items, patchDraft, useIndexes);
+    // 干跑一次落盘函数只为把提醒先算出来，它是纯函数不改原数据
+    const dry = applyPatch(items, patchDraft, useIndexes, Date.now());
+    setPatchAlerts(Array.isArray(dry && dry.alerts) ? dry.alerts : []);
+    setPatchNoticeId(noticeId);
+    setPatchIndexes(useIndexes);
+    setPatchReview(review);
+    setPatchStep("review");
+  }
+
+  function handlePatchConfirm() {
+    const notice = notices.find((n) => n.id === patchNoticeId);
+    if (!notice || !patchDraft) return;
+    const items = notice.analysis?.items || notice.items || [];
+    const result = applyPatch(items, patchDraft, patchIndexes, Date.now());
+    const nextItems = result.items;
+    const record = result.record;
+    setNotices((prev) =>
+      prev.map((n) => {
+        if (n.id !== patchNoticeId) return n;
+        const history = Array.isArray(n.history) ? n.history.slice() : [];
+        history.push(record);
+        // 事项存两处，最外层和分析结果里都要写，只写一处日历那边不动
+        return {
+          ...n,
+          items: nextItems,
+          analysis: { ...n.analysis, items: nextItems },
+          history: history,
+        };
+      })
+    );
+    setPatchStep("closed");
+    setPatchDraft(null);
+    setPatchReview(null);
+    setPatchNoticeId(null);
+    setPatchIndexes([]);
+    setPatchAlerts([]);
+    handleSelect(notice.id);
+  }
+
+  function handlePatchCancel() {
+    // 取消一律当作没发生，原通知一个字都不改
+    setPatchStep("closed");
+    setPatchDraft(null);
+    setPatchReview(null);
+    setPatchNoticeId(null);
+    setPatchIndexes([]);
+    setPatchAlerts([]);
+  }
+
   function handleDismissWarning() {
     setWarningDismissed(true);
   }
@@ -685,6 +775,26 @@ export default function Home() {
           onView={handleDuplicateView}
           onImport={handleDuplicateImport}
           onCancel={handleDuplicateCancel}
+        />
+      )}
+
+      {patchStep === "link" && patchDraft && (
+        <PatchLinkDialog
+          notices={notices}
+          patchResult={patchDraft}
+          onCancel={handlePatchCancel}
+          onNext={handlePatchPickNotice}
+        />
+      )}
+
+      {patchStep === "review" && patchReview && (
+        <PatchReviewDialog
+          review={patchReview}
+          rawText={(patchDraft && patchDraft.rawText) || ""}
+          alerts={patchAlerts}
+          onConfirm={handlePatchConfirm}
+          onCancel={handlePatchCancel}
+          onFieldClick={(span) => handleHighlightSpan(span)}
         />
       )}
 

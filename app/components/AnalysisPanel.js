@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import ItemsPanel from "./ItemsPanel";
+import PatchHistory from "./PatchHistory";
 import { parseUserDateInput } from "../lib/deadline.js";
 import { getNoticeTitle } from "../lib/shareText.js";
 import { shortParseErrorLabel, describeParseError } from "../lib/aiExtract.js";
@@ -388,6 +389,14 @@ export default function AnalysisPanel({
                 onEditField={(index, fieldKey, nextValue) => {
                   if (onEditItemField) onEditItemField(index, fieldKey, nextValue);
                 }}
+              />
+              <PatchHistory
+                history={
+                  selectedNotice && Array.isArray(selectedNotice.history)
+                    ? selectedNotice.history
+                    : []
+                }
+                onLocate={onFieldClick}
               />
             </div>
             </div>

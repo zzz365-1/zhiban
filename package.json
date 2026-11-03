@@ -13,6 +13,7 @@
     "test:regex-lint": "node scripts/test-regex-lint.mjs",
     "test:items": "node scripts/test-items.mjs",
     "test:route": "node scripts/test-route.mjs",
+    "test:patch": "node scripts/test-patch.mjs",
     "test:extract": "node scripts/test-extract.mjs",
     "test:location": "node scripts/test-location.mjs",
     "test:calendar": "node scripts/test-calendar.mjs",
