@@ -15,6 +15,7 @@
     "test:route": "node scripts/test-route.mjs",
     "test:patch": "node scripts/test-patch.mjs",
     "test:conflict": "node scripts/test-conflict.mjs",
+    "test:round1": "node scripts/test-round1.mjs",
     "test:extract": "node scripts/test-extract.mjs",
     "test:location": "node scripts/test-location.mjs",
     "test:calendar": "node scripts/test-calendar.mjs",

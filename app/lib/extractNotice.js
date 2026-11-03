@@ -338,6 +338,73 @@ function extractEventDate(text, deadlineCand) {
 // 分句边界。日期和时间必须落在同一小句里才算同源。
 const CLAUSE_SPLIT = /[，。；;！？、\n]/;
 
+// ---------- 中文数字时间归一 ----------
+//
+// 【为什么要归一】
+// 校园通知里写「下午两点半」「晚上七点」是常态，原三条正则只认阿拉伯数字，
+// 这类写法全部抽空，界面上没有时间，也就没法生成日历提醒。
+// 归一的做法是：进正则之前，把紧挨「点/时/分/半」的中文数字换成阿拉伯数字，
+// 换完立刻走原来的匹配，原逻辑一行不改。
+//
+// 【为什么不整篇替换】
+// 整篇换会碰到日期、楼号、序号里的中文数字，影响面收不住。
+// 只在时间匹配的那一小段里换，且只在 extractTime 与区间扫描这两处换。
+
+// 单个中文数字对照表。两与二同值。
+const CJK_DIGIT = {
+  一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9,
+};
+
+// 把一小段中文数字转成整数，转不了返回 null。
+// 十位组合按「十几」「几十」「几十几」三种写法分别处理，
+// 十点必须是十点，不能被算成一点。
+function cjkNumToInt(s) {
+  if (!s) return null;
+  const d = CJK_DIGIT;
+  if (s === "十") return 10;
+  if (s.length === 2 && s[0] === "十" && d[s[1]] !== undefined) {
+    return 10 + d[s[1]];
+  }
+  if (s.length === 3 && d[s[0]] !== undefined && s[1] === "十" && d[s[2]] !== undefined) {
+    return d[s[0]] * 10 + d[s[2]];
+  }
+  if (s.length === 2 && d[s[0]] !== undefined && s[1] === "十") {
+    return d[s[0]] * 10;
+  }
+  if (s.length === 1 && d[s] !== undefined) return d[s];
+  return null;
+}
+
+// 【为什么不给「点」后面加允许清单】
+// 试过一版只放行半分秒钟到至这类字，结果下午三点举行、晚上七点开始全被挡掉，
+// 召回掉得比防住的误伤还多。这里改成与阿拉伯数字写法完全同一套口径：
+// 三点要求和3点要求的处理一致，两条路都不做量词判断，避免同一条通知两种写法两个结果。
+// 把中文数字时间换成阿拉伯数字时间，其余字符原样保留。
+function normalizeCjkTimeDigits(str) {
+  if (!str) return str;
+  const CN_NUM = "[一二两三四五六七八九十]{1,3}";
+
+  // 第一趟：点或时前面的中文数字。
+  let out = str.replace(
+    new RegExp("(" + CN_NUM + ")([ ]*[点时])", "g"),
+    (m, num, tail) => {
+      const v = cjkNumToInt(num);
+      return v === null ? m : v + tail;
+    }
+  );
+
+  // 第二趟：点或时后面的中文分钟数，比如十一点二十、两点一刻里的二十。
+  out = out.replace(
+    new RegExp("([点时][ ]*)(" + CN_NUM + ")([ ]*(?:分|半))", "g"),
+    (m, head, num, tail) => {
+      const v = cjkNumToInt(num);
+      return v === null ? m : head + v + tail;
+    }
+  );
+
+  return out;
+}
+
 /**
  * 取出日期所在的那一小句，只在里面找时间。
  *
@@ -372,6 +439,8 @@ function extractTime(text, deadlineCand) {
   if (deadlineCand) {
     scope = timeScopeFor(text, deadlineCand);
   }
+  // 归一只做在截好的小句上，原文一个字都不改，也不影响依据回查的下标。
+  scope = normalizeCjkTimeDigits(scope);
   let m = scope.match(
     new RegExp(
       // 【为什么词表里要单独放一个晚字】
@@ -452,7 +521,8 @@ function rangeScopeFor(text, cand) {
  * 但这里是“紧贴当前位置”匹配，所以统一加 ^ 锚定。
  */
 function matchTimeAt(scope, from) {
-  const rest = scope.slice(from);
+  // 与 extractTimeRangeEnd 里的 scope 用同一套字符，避免下标错位。
+  const rest = normalizeCjkTimeDigits(scope.slice(from));
 
   let m = rest.match(new RegExp("^" + TIME_AMPM_SRC));
   if (m) {
@@ -516,7 +586,8 @@ function toHHMM(totalMinutes) {
 export function extractTimeRangeEnd(text, dateCand) {
   if (!text) return null;
 
-  const scope = rangeScopeFor(text, dateCand);
+  // 与 matchTimeAt 用同一套字符，先归一再做区间扫描，避免下标错位。
+  const scope = normalizeCjkTimeDigits(rangeScopeFor(text, dateCand));
 
   // 找区间起点：从最左边开始扫，遇到第一个能匹配上的时间就算开始。
   // 不能只试 scope 开头，前面可能有“时间：”这类引导语。
@@ -1135,6 +1206,23 @@ function cleanMaterialItem(s) {
   );
   t = trimPunctuation(t);
 
+  // 【动作与到达边界硬切】
+  // 真实踩过坑：携带本人身份证和学生证到体育馆一层完成采集。
+  // 按和字切成两段，后一段是「学生证到体育馆一层完成采集」，
+  // 地点和动作全被当成材料名的一部分，界面上直接显示成一整句。
+  // 做法：在单项里找第一个到达类介词或动作词，从这里一刀切断。
+  // 只认明确的到达与提交动作，单字泛词一概不收，避免切坏材料名本身。
+  {
+    const MATERIAL_BOUNDARY = new RegExp(
+      "(?:到|至|前往|送达|送至|交至|交到|交回|提交|报送|上交|递交|完成|进行)"
+    );
+    const bm = t.match(MATERIAL_BOUNDARY);
+    if (bm && bm.index > 0) {
+      t = t.slice(0, bm.index).trim();
+      t = trimPunctuation(t);
+    }
+  }
+
   if (t.length < 1 || t.length > 20) return null;
   if (LEADING_STOP_RE.test(t)) return null;
   return t;
@@ -1211,6 +1299,19 @@ function collectFormEndingCandidates(text) {
     const finalWord = trimmedBody + last;
     if (finalWord.length < 2) continue;
     if (MATERIAL_FORM_BLOCK.test(finalWord)) continue;
+
+    // 【祈使句前缀一律不收】
+    // 真实踩过坑：请各实验室对照检查表完成自查。
+    // 结尾词是检查表，前面那串祈使句被当成修饰成分一起收进来，
+    // 抽出来的材料是「请各实验室对照检查表」，那是半句话不是材料。
+    // 表内不放自查和检查，自查表这类真材料名不能被误删。
+    if (
+      new RegExp(
+        "^(?:请|各|对照|按照|根据|完成|及时|做好|开展|组织|进行|发现|问题|整改|须|需|应|将|把)"
+      ).test(finalWord)
+    ) {
+      continue;
+    }
 
     const start = m.index + (word.length - finalWord.length);
     candidates.push({ word: finalWord, start, end: m.index + word.length });

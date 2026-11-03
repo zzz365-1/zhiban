@@ -73,12 +73,20 @@ export function splitSentences(text) {
 const SUBMIT_WORDS = [
   "截止", "报送", "提交", "报名", "上交", "递交", "交到", "交至", "交于",
   "缴纳", "填写", "申请", "办理", "确认", "领取", "归还", "补交",
+  // 第一轮自检补的：明确要动手做、但原来词表里没有的办事动词。
+  // 真实踩过坑：实验室安全自查、毕业生图像采集这两类通知，
+  // 整条通知一个事项都拆不出来，界面是空的，用户不知道要干什么。
+  "自查", "自检", "整改", "排查", "核验", "复核", "登记", "采集", "携带",
+  "上传", "申报", "备案", "复检", "补办", "补测", "补考",
 ];
 
 // 活动类关键词：要去参加的事
 const EVENT_WORDS = [
   "举行", "举办", "召开", "开始", "比赛", "讲座", "检查", "培训", "会议",
   "评审", "初赛", "决赛", "开赛", "开场", "开幕", "签到", "集合", "出发",
+  // 第一轮自检补的：要到场参加的事。
+  "体检", "演练", "考试", "笔试", "面试", "答辩", "宣讲会", "见面会",
+  "参观", "观摩", "开班", "结业", "照相", "拍摄",
 ];
 
 function containsAny(text, words) {
@@ -118,6 +126,51 @@ function firstIndexOfAny(text, words) {
     if (idx !== -1 && (best === -1 || idx < best)) best = idx;
   }
   return best;
+}
+
+// ---------- 零事项兜底 ----------
+//
+// 【为什么要有这一段】
+// 真实踩过坑：请各实验室对照检查表完成自查，发现问题及时整改。
+// 这条通知明确要办事，但整条通知一个事项都没拆出来，界面是空的，
+// 用户拿到手不知道自己要干什么。根因有两层，
+// 一层是分类词表漏了自查这类词，另一层是主流程遇到抽不出日期的句子直接跳过。
+// 补词表只能补到认识的词，补不完，所以再加一道兜底。
+//
+// 【兜底怎么才算安全】
+// 只在整条通知一个事项都没有的时候才走；只认祈使和义务这两种明确要办事的写法；
+// 抽不到的一律留空并标原文未提及，绝不猜。
+
+// 办事动词字符类。一律字符类，不用反斜杠加数字。
+const ACTION_VERB_CLASS =
+  "[做办提交报填缴领还补自查整改排查核验复核登记携带来回上传申报备案]";
+
+// 祈使式：请某某去做某事。中间允许任意字，只要求二十字内出现办事动词。
+// 【为什么中间不限定称呼】试过只放行各班各系全体这类称呼，
+// 请各实验室对照检查表完成自查这种一句都命中不了，兜底等于白加。
+const POLITE_ACTION_RE = new RegExp(
+  "请[^。；;！？]{0,20}(?:" +
+    ACTION_VERB_CLASS +
+    "|完成|开展|参加|落实|组织|配合|对照|准备|领取|报到|采集|体检|演练)"
+);
+
+// 义务式：须于、应于、务必、必须、要求某某完成。
+const OBLIGATION_RE = new RegExp(
+  "(须|需|应|务必|必须|一律)[于在]" +
+    "|要求[各班各系各院各寝室全体同学学生，,：: ]{0,12}" +
+    "(完成|提交|报送|参加|办理|自查|整改|核验|登记|采集)"
+);
+
+// 请于某日前这类，动词没命中也要认。
+const PLEASE_BY_RE = new RegExp("请[于在].{0,12}(前|之前|以前|内)");
+
+function isActionSentence(text) {
+  const s = text == null ? "" : String(text);
+  if (!s) return false;
+  if (POLITE_ACTION_RE.test(s)) return true;
+  if (PLEASE_BY_RE.test(s)) return true;
+  if (OBLIGATION_RE.test(s)) return true;
+  return false;
 }
 
 // ---------- 事项名称 ----------
@@ -523,6 +576,109 @@ export function buildItems(rawText, options) {
     if (item._issues.length > 0) {
       item._complete = false;
     }
+
+    items.push(item);
+    seq++;
+  }
+
+  // 兜底：整条通知一个事项都没拆出来，但原文里有明显要办事的说法。
+  // 原来能正常分类的通知完全走原路径，这里一个字都碰不到。
+  if (items.length === 0) {
+    return buildFallbackItems(text, publishedAt, notice);
+  }
+
+  return items;
+}
+
+// 整条通知零事项时的兜底生成。
+// 逐句找明显要办事的句子，抽多少算多少，抽不到的字段留空并标原文未提及。
+// 日期抽不到也照样生成，因为一件没有写日期的事仍然是事，
+// 界面上会显示待确认，比给用户一个空白页强。
+function buildFallbackItems(text, publishedAt, notice) {
+  const sentences = splitSentences(text);
+  const items = [];
+  let seq = 0;
+
+  for (let si = 0; si < sentences.length; si++) {
+    const sentence = sentences[si];
+    if (!isActionSentence(sentence.text)) continue;
+
+    let local = null;
+    try {
+      local = extractNotice(sentence.text);
+    } catch (e) {
+      local = null;
+    }
+    if (!local) local = {};
+
+    const dateRaw = local.deadline || local.eventDate || null;
+    const timeRaw = local.time || local.eventTime || null;
+    const endTimeRaw = local.eventEndTime || local.endTime || null;
+    const locRaw = local.location || null;
+    const matsRaw = Array.isArray(local.materials) ? local.materials : [];
+
+    const resolvedDate = dateRaw
+      ? resolveDateDisplay(String(dateRaw).trim(), publishedAt)
+      : { date: null, dateStatus: "not_mentioned" };
+
+    const time = timeRaw == null ? null : String(timeRaw).trim() || null;
+    const endTime = endTimeRaw == null ? null : String(endTimeRaw).trim() || null;
+    const location = locRaw || null;
+    const materials = normalizeMaterials(matsRaw);
+
+    let audience = null;
+    if (local.audience) audience = local.audience;
+    else if (notice && notice.audience) audience = notice.audience;
+
+    const name = buildName(true, materials.map((m) => m.name), sentence.text, "submit");
+    const evidence = buildItemEvidence(text, sentence, {
+      date: resolvedDate.dateStatus === "ok" ? resolvedDate.date : null,
+      dateText: dateRaw == null ? null : String(dateRaw).trim(),
+      time: time,
+      location: location,
+      materials: matsRaw,
+    });
+
+    const item = {
+      key: buildKey(name, resolvedDate.date, time, seq),
+      seq: seq,
+      name: name,
+      kind: "submit",
+      timeType: "deadline",
+      timeTypeLabel: "办理截止",
+      date: resolvedDate.date,
+      dateText: dateRaw == null ? null : String(dateRaw).trim(),
+      time: time,
+      endTime: endTime,
+      location: location,
+      materials: materials,
+      suggestions: buildSuggestions(true, materials),
+      audience: audience,
+      progress: "待办理",
+      dateStatus: resolvedDate.dateStatus,
+      evidence: evidence || null,
+      status: {
+        date: resolvedDate.dateStatus,
+        time: time ? "ok" : "not_mentioned",
+        endTime: endTime ? "ok" : "not_mentioned",
+        location: location ? "ok" : "not_mentioned",
+        materials: materials.length > 0 ? "ok" : "not_mentioned",
+        audience: audience ? "ok" : "not_mentioned",
+      },
+      _issues: [],
+      _complete: true,
+      _fallback: true,
+    };
+
+    if (item.time && !isLegalTime(item.time)) {
+      item.status.time = "failed";
+      item._issues.push("时间格式不合法：" + item.time);
+    }
+    if (item.location && locationHasActionWord(item.location)) {
+      item.status.location = "failed";
+      item._issues.push("地点疑似混入动作词：" + item.location);
+    }
+    if (item._issues.length > 0) item._complete = false;
 
     items.push(item);
     seq++;
