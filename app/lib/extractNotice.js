@@ -1060,6 +1060,27 @@ const MATERIAL_FORM_BLOCK = new RegExp(
 // 贴在前面的限定词，命中时要连带前缀一起保留（纸质申请表 不能只给 申请表）。
 const MATERIAL_PREFIX = ["纸质", "电子", "手写", "原件", "双面"];
 
+// 向前补限定词时遇到这些字就停：动作、介词、标点、数量、时间。
+// 真实踩过坑：体检报告被砍成报告，实习证明被砍成证明，
+// 都是因为限定词从来没进过候选。补的时候必须有个刹车，
+// 只收确定的安全字符，宁可少补一个字，也不要把整句话吞进来。
+// 又踩过一次：还要带一支黑色笔 里的 还要带一支 被当成限定词一起补进来。
+// 所以副词、动词、量词、数量一律进刹车表，只留真正的修饰名词在补词范围内。
+const MATERIAL_LEAD_STOP = new Set([
+  "，", "。", "；", ";", "：", ":", "、", "！", "？", "!", "?", " ", "\n",
+  "的", "了", "和", "及", "与", "或", "并", "等", "请", "将", "把",
+  "须", "需", "应", "向", "至", "到", "在", "于", "前", "后",
+  "今", "明", "昨", "本", "下", "上", "次", "月", "日", "号",
+  "点", "时", "分", "第", "各", "名", "位",
+  // 副词与动词：这些东西不可能是材料名的一部分
+  "还", "要", "带", "再", "另", "又", "共", "计", "是", "有", "为",
+  "用", "从", "对", "给", "让", "使", "由", "被", "已", "未", "的",
+  // 量词与数量：一支黑色笔 里的 支 不能进材料名
+  "支", "张", "份", "个", "件", "套", "盒", "台", "部", "只", "条",
+  "枚", "页", "瓶", "包", "块", "片", "一", "二", "两", "三", "四",
+  "五", "六", "七", "八", "九", "十", "几", "多", "半",
+]);
+
 // 一句里出现这些动作词，就以动作为准，绕开上面的语境拦截。
 const MATERIAL_ACTION_RESCUE = new RegExp(
   "(?:交|提交|报送|上交|递交|携带|附上|补交|填写|填报)"
@@ -1184,6 +1205,16 @@ function cleanMaterialItem(s) {
   t = stripLeadingHints(t);
   if (!t) return null;
 
+  // 【剥掉开头的携带类动词】
+  // 真实踩过坑：还要带一支黑色笔到现场，被拆项拆成 还要带一支黑色笔，
+  // 副词和动词一起留在材料名里。剥掉之后再由下面的量词规则去掉一支。
+  // 只剥确定的动词与它前面的副词，材料名本身不会被切。
+  t = t.replace(
+    new RegExp("^(?:还|再|另|又|同时)?(?:要|需|须|应)?(?:携带|带上|带|附上|提供|提交|上交|递交)"),
+    ""
+  );
+  if (!t) return null;
+
   t = trimPunctuation(t);
 
   t = t.replace(
@@ -1266,7 +1297,13 @@ function collectFormEndingCandidates(text) {
     // 【绝不能加的字】报 —— “报名表”里的“报”一旦入表，会从后往前把它当成
     //   分界，报名表被截成“名表”。同理 申、登、汇 等构成材料名本身的字也不可加。
     //   新增任何字之前，先拿“报名表/申请表/体温监测表/学生证”这组用例验一遍。
-    const STOP = "带送交到至在于前将";
+    // 【为什么又把 前 和 将 放回去了】
+    // 试过把 于 前 将 三个字一起去掉，结果
+    // 请于11月5日下午5点前将纸质申请表报送至学生工作处 这条，
+    // 从后往前一路切到时间点上，材料名变成 5点前将纸质申请表。
+    // 实测下来只有 于 可以去掉，前 和 将 必须留着当刹车。
+    // 报 仍然不能加，报名表会被从后往前切成名表，那次已经踩过。
+    const STOP = "带送交到至前将";
     for (let i = body.length - 1; i >= 0; i--) {
       const ch = body[i];
       if (STOP.indexOf(ch) !== -1) {
@@ -1383,7 +1420,37 @@ function collectMaterialCandidates(text) {
       }
 
       if (hasAction || hasOtherMaterial) {
-        candidates.push({ word, start: idx, end: idx + word.length });
+        // 【向前补限定词】
+        // 白名单只认得报告、证明这类词根，前面的限定词从来没进过候选，
+        // 界面上就显示成报告和证明，用户不知道要交哪一份。
+        // 做法：从命中起点向前最多吃六个汉字，遇到动作介词标点数量时间就停。
+        // 只补一次，不递归。补出来的一段若含动作词，说明吃多了，退回只留词根。
+        let start = idx;
+        let guard = 0;
+        while (start > 0 && guard < 6) {
+          if (MATERIAL_LEAD_STOP.has(text[start - 1])) break;
+          start--;
+          guard++;
+        }
+        // 补出来的部分开头若是数量词，剥掉，体检报告不能变成一体检报告。
+        const lead = text.slice(start, idx);
+        const leadNoNum = lead.replace(new RegExp("^[" + NUMBER_CHARS + "]+"), "");
+        start += lead.length - leadNoNum.length;
+
+        const fullWord = text.slice(start, idx + word.length);
+        if (
+          fullWord.length > 30 ||
+          hasActionWordInLocation(fullWord) ||
+          LEADING_STOP_RE.test(fullWord)
+        ) {
+          candidates.push({ word, start: idx, end: idx + word.length });
+        } else {
+          candidates.push({
+            word: fullWord,
+            start: start,
+            end: idx + word.length,
+          });
+        }
       }
       idx = text.indexOf(word, idx + 1);
     }
@@ -1514,6 +1581,36 @@ function attachMaterialPrefix(word, text) {
   return word;
 }
 
+/**
+ * 提交类动词后面直接跟一串并列项时，把每一项都当材料候选。
+ *
+ * 【为什么需要】
+ * 真实踩过坑：请交户口本复印件和家长知情同意书。
+ * 白名单认得户口本和复印件，家长知情同意书不在任何词表里，第二项整个丢掉。
+ * 所以这里按「提交动词 → 到句末 → 按顿号和以及还有和与拆项」兜一层，
+ * 拆出来的每一项交给清洗函数处理，脏的会被它丢掉。
+ *
+ * 【为什么不认 包括 如下 那类引导词】
+ * 那类写法已经有清单分支在管，两个入口同时开容易重复也容易误伤。
+ */
+function collectVerbListCandidates(text) {
+  const results = [];
+  const re = new RegExp(
+    "(?:交|提交|上交|递交|报送|携带|附上|提供|上传)[ ]*([^。" + LF + ";；]{2,120})",
+    "g"
+  );
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const body = stripParentheses(m[1]);
+    const parts = body.split(new RegExp("[、,，]|以及|还有|和|及|与"));
+    for (const p of parts) {
+      const item = cleanMaterialItem(p);
+      if (item) results.push(item);
+    }
+  }
+  return results;
+}
+
 function extractMaterials(text) {
   const noParens = stripParentheses(text);
   let candidates = [];
@@ -1525,6 +1622,20 @@ function extractMaterials(text) {
 
   const carryItems = extractCarryItems(text);
   for (const item of carryItems) {
+    let idx = noParens.indexOf(item);
+    if (idx === -1) {
+      candidates.push({ word: item, start: -1, end: -1 });
+    } else {
+      while (idx !== -1) {
+        candidates.push({ word: item, start: idx, end: idx + item.length });
+        idx = noParens.indexOf(item, idx + 1);
+      }
+    }
+  }
+
+  // 提交类动词加并列项，用来补白名单认不出的那一项。
+  const verbItems = collectVerbListCandidates(text);
+  for (const item of verbItems) {
     let idx = noParens.indexOf(item);
     if (idx === -1) {
       candidates.push({ word: item, start: -1, end: -1 });
