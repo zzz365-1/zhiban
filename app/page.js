@@ -166,6 +166,10 @@ export default function Home() {
   // 刚刚确认更新后的成功提示数据，给变更记录页用
   const [patchSuccess, setPatchSuccess] = useState(null);
 
+  // 本地保存失败的界面提示。非空时顶部出现提示条，
+  // 内容留在页面上不动，用户可以原地重试。
+  const [saveError, setSaveError] = useState(null);
+
   useEffect(() => {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
@@ -203,14 +207,36 @@ export default function Home() {
     // 只在挂载时跑一次
   }, []);
 
-  useEffect(() => {
-    if (!hydrated) return;
+  // 真正往本地存储写一次。成功返回真并清掉旧提示，失败返回假并亮出提示。
+  // 重试入口也走这个函数，所以它必须是独立可调用的，不能只写在副作用里。
+  function persistNotices(list) {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(notices));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+      setSaveError(null);
+      return true;
     } catch (e) {
       console.warn("保存本地通知失败：", e);
+      setSaveError({ snapshot: list });
+      return false;
     }
-  }, [notices, hydrated]);
+  }
+
+  useEffect(() => {
+    if (!hydrated) return;
+    // 已经有未解决的保存失败时就别自动重写，免得把提示自己冲掉
+    if (saveError) return;
+    persistNotices(notices);
+  }, [notices, hydrated, saveError]);
+
+  function handleRetrySave() {
+    const snapshot = saveError && saveError.snapshot;
+    const list = Array.isArray(snapshot) ? snapshot : notices;
+    persistNotices(list);
+  }
+
+  function handleDismissSaveError() {
+    setSaveError(null);
+  }
 
   useEffect(() => {
     setWarningDismissed(false);
@@ -932,6 +958,29 @@ export default function Home() {
             </button>
           }
         />
+
+        {saveError && (
+          <div
+            role="alert"
+            className="flex flex-none items-center gap-3 border-b border-[#FECACA] bg-[#FEF2F2] px-4 py-2 text-[13px] text-[#991B1B]"
+          >
+            <span>这次没保存成功，你写的内容和解析结果都还在。</span>
+            <button
+              type="button"
+              onClick={handleRetrySave}
+              className="inline-flex h-8 items-center rounded-[8px] border border-[#FCA5A5] bg-white px-3 text-[13px] text-[#991B1B] transition-colors duration-200 ease-out hover:bg-[#FEE2E2] motion-reduce:transition-none"
+            >
+              再试一次
+            </button>
+            <button
+              type="button"
+              onClick={handleDismissSaveError}
+              className="ml-auto inline-flex h-8 items-center rounded-[8px] px-2 text-[13px] text-[#991B1B]/80 hover:bg-[#FEE2E2]"
+            >
+              先不管
+            </button>
+          </div>
+        )}
 
         <main className="min-h-0 flex-1 overflow-hidden">
           {view === "workbench" && (

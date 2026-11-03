@@ -48,7 +48,7 @@
 | 日期歧义 | 评测语料 D17 下周三、D18 半个月后、E08 下周五下午、E09 时间另行通知、E13 每周三 | 下周三能换算，半个月后与周期说法保留原文并标待确认，详见 `docs/eval-report.md` | 部分通过，遗留见下 |
 | 模型不可用 | 浏览器内拦掉 `/api/parse` 请求后解析一条信息不全的通知 | 状态栏显示「解析失败」，原文完整保留，顶部「重新解析」入口在 | 通过 |
 | 解析失败 | 同上，另外粘贴「请于11月25日前完成青年大学习」 | 显示「这条通知里没有拆出具体事项」，原文保留，有重新解析入口 | 通过，但空态文案偏弱 |
-| 保存失败 | localStorage 写入异常 | **未构造成功，本次未覆盖**。代码里写入处有 try 与告警，但没有端到端实测 | 未覆盖，如实说明 |
+| 保存失败 | localStorage 写入异常 | 已在 2026-11-03 自检轮构造成功并修好：界面出现「这次没保存成功」提示条与「再试一次」，恢复存储后重试提示消失且数据真的落盘。详见 `docs/self-check-2026-11-03.md` 第六轮 | 通过（自检轮补测） |
 
 ## 四、本轮发现并修掉的真实缺陷
 
@@ -64,15 +64,28 @@
 
 ## 五、仍存在的问题（不遮掩）
 
-1. **本地规则路径下部分通知拆不出事项**。48 条评测语料里有 12 条 `buildItems` 返回 0 条事项，编号 D12、D13、D14、D18、D24、E02、E03、E09、E12、E13、E18、E20，另有 E07 预期 2 条实际只有 1 条。界面只显示「这条通知里没有拆出具体事项。」，没有就地给出「检查原文」「手动添加事项」这类恢复动作，恢复只能靠顶部的重新解析按钮。生产链路 `app/page.js` 调用的正是 `buildItems(text)`，所以这不是评测脚本造成的偏差。
+1. **零事项已在本轮收尾复核中归零**。原先 48 条评测语料里有 12 条 `buildItems` 返回 0 条事项，经 069 到 074 六条链修复后降到 0 条，全对条数从 15 条升到 19 条。详见 `docs/self-check-2026-11-03.md` 第七轮。**仍存**：事项名偏泛化（见第 2 条）；界面在真的抽不出事项时只显示「这条通知里没有拆出具体事项。」，没有就地给出「检查原文」「手动添加事项」这类恢复动作，恢复只能靠顶部的重新解析按钮。
 2. **事项名泛化**。独立评测里多处事项名回退成「参加活动」「提交材料」「领取材料」，不带具体活动名。事项名正确率在独立评测集只有 27.6%。
 3. **日期与地点串句**。D08 选课通知把 12 月 8 日 9:00 的开始时间当成截止，E07 把第二句的日期和地点串到第一句。
 4. **地点漏抽**。教三401、模拟法庭、学生宿舍等写法在部分句子里抽不到，独立评测集地点正确率 62.1%。
 5. **材料漏抽 4 件**（学生证、毛巾、回执、准考证），误抽 0 件。误提防线有效，覆盖面还不够。
-6. **保存失败未做端到端实测**，只看到代码里有异常捕获。
+6. **保存失败**。2026-11-03 自检轮已补做端到端实测：注入 localStorage 写入异常后界面出现红色提示条与「再试一次」，恢复写入后重试成功落盘，见 `docs/self-check-2026-11-03.md` 第六轮与截图 `docs/screens/2026-11-03-46-round6-save-error-1280.png`。**遗留**：写入失败瞬间，该条通知的状态标签仍显示「已保存」，靠顶部提示条纠正，未做标签联动。
 7. **已保存通知的原文是只读的**，编辑重新解析只在草稿态可用，与部分用户预期可能不一致。
 8. **模型路径未在本次评测范围内**，因为要用使用者自己的密钥，无法在交付材料里复现。README 里 88/91 那组数字来自此前 `scripts/batch-run-031.mjs` 已产出的报告。
 
 ## 六、离线回归
 
-`check:key`、`check:regex`、`check:prompt`、`test:regex-lint`、`test:items`、`test:route`、`test:patch`、`test:conflict`、`test:extract`、`test:location`、`test:calendar`、`test:relative`、`test:manual`、`test:share`、`test:title`、`test:batch`、`test:audience-materials`、`test:materials-date`、`test:mode-guard`、`test:sample`、`test:classify`、`test:grounding`、`test:locate`、`validate:ics`、`coverage`、`eval`、`demo:check` 共 27 条命令全部 exit 0，全程不联网、不读密钥。
+自检轮补测后：`check:key`、`check:regex`、`check:prompt`、`test:regex-lint`、`test:items`、`test:route`、`test:patch`、`test:conflict`、`test:round1`、`test:round2`、`test:round3`、`test:round4`、`test:extract`、`test:location`、`test:calendar`、`test:relative`、`test:manual`、`test:share`、`test:title`、`test:batch`、`test:audience-materials`、`test:materials-date`、`test:mode-guard`、`test:sample`、`test:classify`、`test:grounding`、`test:locate`、`validate:ics`、`coverage`、`eval`、`demo:check` 共 31 条命令（其中 `test:round4` 为本轮新增）全部 exit 0，全程不联网、不读密钥。另 `npm run build` 编译通过。
+
+
+## 七、2026-11-03 自检轮补充
+
+按新的自检安排，由本人逐轮重跑第一二三四六轮，
+不再逐轮等老师验收。完整记录见 `docs/self-check-2026-11-03.md`。
+
+补充结论：
+- 保存失败已端到端构造并修好，不再是未覆盖项。
+- 模型不可用一项重跑时，本地规则会顶上并完成解析，界面显示网络异常与模型调用失败，本地规则结果保留，有重新解析入口，符合无密钥也能完整体验的设计。
+- 加载状态未捕捉到可见中间态，标记未验证，不编造结论。
+- 第五轮冲突提醒按本次安排跳过验收，代码未删。
+- 数据层共修掉七个缺陷：中文数字时间、零事项、材料误提、材料限定词、标题行材料误提、补充通知晚点时间、保存失败提示。

@@ -164,12 +164,102 @@ const OBLIGATION_RE = new RegExp(
 // 请于某日前这类，动词没命中也要认。
 const PLEASE_BY_RE = new RegExp("请[于在].{0,12}(前|之前|以前|内)");
 
+// 第三类认定：事件名词 + 同句带时间或地点。
+// 真实踩过坑：学术讲座通知只有 时间/地点/欢迎广大师生参加，一句请、一句须于都没有，
+// 兜底直接跳过，整条零事项。但讲座本身就是一件要去参加的事。
+// 只认明确的事件名词，且必须同句还有时间或地点跟着，否则不造。
+const EVENT_NOUN_FALLBACK = [
+  "讲座", "报告会", "评审会", "开幕式", "典礼", "演出",
+  "培训", "会议", "比赛",
+];
+
+// 时间线索：几点、点整、时分、上下午、年月日、周几、另行通知.
+// 一律字符类，不用反斜杠加数字。
+const FALLBACK_TIME_HINT = new RegExp(
+  "([0-9一二三四五六七八九十两]+[点时]|[0-9一二三四五六七八九十两]+分" +
+  "|上午|下午|中午|晚上|早上|凌晨" +
+  "|[0-9一二三四五六七八九十两]+月[0-9一二三四五六七八九十两]+[日号]?" +
+  "|[0-9]{4}年|周[一二三四五六日天]|星期[一二三四五六日天]|另行通知)"
+);
+
+// 地点线索：地点词 + 楼上/楼/厅/室/馆/场/中心/校区/在某某.
+const FALLBACK_LOC_HINT = new RegExp(
+  "(地点|在[^。；;！？]{0,20}" +
+  "(楼|厅|室|馆|场|中心|校区|教室|报告厅))" +
+  "|(楼|厅|室|馆|场|中心|校区|报告厅)"
+);
+
+// 第三类认定：服务动词 + 同句带地点或时间。
+// 真实踩过坑：关于补办学生证的通知，只有 办理/需携带，没有请、没有须于，
+// 兜底跳过，整条零事项。但补办本身就是要办的事。
+const SERVICE_VERB_FALLBACK = [
+  "办理", "受理", "开放", "领取", "补办", "申报",
+];
+
+function hasAnyWord(text, words) {
+  for (let i = 0; i < words.length; i++) {
+    if (text.indexOf(words[i]) !== -1) return true;
+  }
+  return false;
+}
+
+// 纯告知句式：荣获、特此通报、上线运行、放假安排这类，
+// 有日期也不许造事项。真实三条纯告知都踩在这里。
+// 【为什么不放 已于】已于在正常通知里太常见，比如报名已于11月1日开始，
+// 放进来会误伤，而这三条纯告知已被下面别的词拦住，不需要它。
+const PURE_NOTICE_RE = new RegExp(
+  "(荣获|特此通报|特此通知|上线运行|欢迎使用|放假安排|放假时间)"
+);
+
+// 改期说法：原定某日某活动调整至另一日。
+// 【为什么要有这一类】
+// 真实踩过坑：关于2026年秋季校园招聘会双选会的补充通知，
+// 原定11月15日9点00的双选会调整至11月18日14点30，地点改为体育馆主馆，其余安排不变。
+// 抽取模块把日期时间地点全抽对了（11月18日 / 14点30 / 体育馆主馆），
+// 但整条零事项，界面空白。原因：双选会不在事件名词表里，一句请也没有，一句须于也没有，
+// 三类兜底全没中。而改期本身就是一件要办的事——用户必须按新时间去。
+// 改期说法就那么几个固定词，比活动名词可靠得多，所以单独认一类。
+// 【怎么才安全】整条里必须真的出现改期引导词，且改期日期之后必须真的抽得出日期。
+// 纯告知三条不含改期说法，碰不到这里。
+const RESCHEDULE_HINT = new RegExp(
+  "(调整(?:至|到|为)|延期(?:至|到)|推迟(?:至|到)|顺延(?:至|到)|" +
+    "改(?:为|至|到)|变更(?:为|至|到)|更新(?:为|至|到))"
+);
+
+// 整条里有没有改期说法，有才走改期认定。
+function isRescheduleNotice(text) {
+  const s = text == null ? "" : String(text);
+  if (!s) return false;
+  if (PURE_NOTICE_RE.test(s)) return false;
+  return RESCHEDULE_HINT.test(s);
+}
+
+// 新增第三类：事件名词类 / 服务动词类。
+// 两类都要求同句还有时间或地点跟着，否则不认，绝不勉强造。
+function isNamedActionSentence(text) {
+  const s = text == null ? "" : String(text);
+  if (!s) return false;
+  if (PURE_NOTICE_RE.test(s)) return false;
+
+  const hasTime = FALLBACK_TIME_HINT.test(s);
+  const hasLoc = FALLBACK_LOC_HINT.test(s);
+
+  if (hasAnyWord(s, EVENT_NOUN_FALLBACK) && (hasTime || hasLoc)) {
+    return true;
+  }
+  if (hasAnyWord(s, SERVICE_VERB_FALLBACK) && (hasTime || hasLoc)) {
+    return true;
+  }
+  return false;
+}
+
 function isActionSentence(text) {
   const s = text == null ? "" : String(text);
   if (!s) return false;
   if (POLITE_ACTION_RE.test(s)) return true;
   if (PLEASE_BY_RE.test(s)) return true;
   if (OBLIGATION_RE.test(s)) return true;
+  if (isNamedActionSentence(s)) return true;
   return false;
 }
 
@@ -630,7 +720,19 @@ function buildFallbackItems(text, publishedAt, notice) {
     if (local.audience) audience = local.audience;
     else if (notice && notice.audience) audience = notice.audience;
 
-    const name = buildName(true, materials.map((m) => m.name), sentence.text, "submit");
+    // 第三类认定进来的句子，事件名词类不能按“手续”起名，
+    // 否则 讲座 会被叫成“提交材料”，跟实际对不上。
+    const namedKind = hasAnyWord(sentence.text, EVENT_NOUN_FALLBACK) &&
+      !hasAnyWord(sentence.text, SERVICE_VERB_FALLBACK)
+      ? "event"
+      : "submit";
+    const isSubmit = namedKind === "submit";
+    const name = buildName(
+      isSubmit,
+      materials.map((m) => m.name),
+      sentence.text,
+      namedKind
+    );
     const evidence = buildItemEvidence(text, sentence, {
       date: resolvedDate.dateStatus === "ok" ? resolvedDate.date : null,
       dateText: dateRaw == null ? null : String(dateRaw).trim(),
@@ -643,16 +745,16 @@ function buildFallbackItems(text, publishedAt, notice) {
       key: buildKey(name, resolvedDate.date, time, seq),
       seq: seq,
       name: name,
-      kind: "submit",
-      timeType: "deadline",
-      timeTypeLabel: "办理截止",
+      kind: namedKind,
+      timeType: isSubmit ? "deadline" : "start",
+      timeTypeLabel: isSubmit ? "办理截止" : "开始时间",
       date: resolvedDate.date,
       dateText: dateRaw == null ? null : String(dateRaw).trim(),
       time: time,
       endTime: endTime,
       location: location,
-      materials: materials,
-      suggestions: buildSuggestions(true, materials),
+      materials: isSubmit ? materials : [],
+      suggestions: buildSuggestions(isSubmit, isSubmit ? materials : []),
       audience: audience,
       progress: "待办理",
       dateStatus: resolvedDate.dateStatus,
@@ -662,7 +764,9 @@ function buildFallbackItems(text, publishedAt, notice) {
         time: time ? "ok" : "not_mentioned",
         endTime: endTime ? "ok" : "not_mentioned",
         location: location ? "ok" : "not_mentioned",
-        materials: materials.length > 0 ? "ok" : "not_mentioned",
+        materials: isSubmit
+          ? (materials.length > 0 ? "ok" : "not_mentioned")
+          : "not_applicable",
         audience: audience ? "ok" : "not_mentioned",
       },
       _issues: [],
@@ -684,7 +788,284 @@ function buildFallbackItems(text, publishedAt, notice) {
     seq++;
   }
 
+  // 逐句都判不中，但整条里有改期说法：改期本身就是一件要办的事。
+  // 这条通知双选会不在事件名词表里、没有请、没有须于，只有原定…调整至…
+  // 改期日期和时间都用抽取模块抽到的调整后的值，不用作废的旧值。
+  if (items.length === 0) {
+    const resched = buildRescheduleItem(text, publishedAt, notice);
+    if (resched) return [resched];
+  }
+
+  // 逐句都判不中，但整条里有事件名词、也有时间或地点：
+  // 一行一个字段的写法（讲座 / 时间 / 地点 / 欢迎参加）很常见，
+  // 这种整条再判一次，造一条事项。整条也判不中就还是零事项。
+  if (items.length === 0) {
+    const whole = buildWholeNoticeFallback(text, publishedAt, notice);
+    if (whole) return [whole];
+  }
+
   return items;
+}
+
+// ---------- 改期兜底 ----------
+//
+// 【为什么单独造一条】
+// 原定11月15日9点00的双选会调整至11月18日14点30，地点改为体育馆主馆。
+// 抽取模块对整条调用时，截止日期已经是调整后的 11月18日，时间 14点30，
+// 活动时间同样是调整后的 14点30，作废的 9点00 已被改期逻辑挡在窗口外。
+// 这里直接把这些抽到的值装成一条事项，不再按句分类，也不再拼词表。
+//
+// 【怎么才安全】
+// 只在整条零事项时调用（调用处已保证）；
+// 整条里必须真的出现改期说法；抽出的日期必须是调整后的那个，抽不到就不造；
+// 纯告知三条不含改期说法，一条都碰不到。
+function buildRescheduleItem(text, publishedAt, notice) {
+  const s = text == null ? "" : String(text);
+  if (!s) return null;
+  if (!isRescheduleNotice(s)) return null;
+
+  let local = null;
+  try {
+    local = extractNotice(s);
+  } catch (e) {
+    local = null;
+  }
+  if (!local) local = {};
+
+  // 改期句：调整后的日期在抽取模块里落在 eventDate / deadline 上。
+  // 两个都空说明改期日期没抽出来，宁可不造，也不拿作废日期顶上。
+  const dateRaw = local.eventDate || local.deadline || null;
+  if (!dateRaw) return null;
+
+  const timeRaw = local.eventTime || local.time || null;
+  const endTimeRaw = local.eventEndTime || local.endTime || null;
+  const locRaw = local.location || null;
+
+  const resolvedDate = resolveDateDisplay(String(dateRaw).trim(), publishedAt);
+
+  const time = timeRaw == null ? null : String(timeRaw).trim() || null;
+  const endTime = endTimeRaw == null ? null : String(endTimeRaw).trim() || null;
+  const location = locRaw || null;
+
+  let audience = null;
+  if (local.audience) audience = local.audience;
+  else if (notice && notice.audience) audience = notice.audience;
+
+  // 名称：优先事件名词，没有再退回“按调整后时间参加”。
+  const noun = pickEventNoun(s);
+  const name = noun ? "参加" + noun : "按调整后时间参加活动";
+
+  const evidence = buildItemEvidence(s, { text: s, start: 0 }, {
+    date: resolvedDate.dateStatus === "ok" ? resolvedDate.date : null,
+    dateText: String(dateRaw).trim(),
+    time: time,
+    location: location,
+    materials: [],
+  });
+
+  const item = {
+    key: buildKey(name, resolvedDate.date, time, 0),
+    seq: 0,
+    name: name,
+    kind: "event",
+    timeType: "start",
+    timeTypeLabel: "开始时间",
+    date: resolvedDate.date,
+    dateText: String(dateRaw).trim(),
+    time: time,
+    endTime: endTime,
+    location: location,
+    materials: [],
+    suggestions: buildSuggestions(false, []),
+    audience: audience,
+    progress: "待办理",
+    dateStatus: resolvedDate.dateStatus,
+    evidence: evidence || null,
+    status: {
+      date: resolvedDate.dateStatus,
+      time: time ? "ok" : "not_mentioned",
+      endTime: endTime ? "ok" : "not_mentioned",
+      location: location ? "ok" : "not_mentioned",
+      materials: "not_applicable",
+      audience: audience ? "ok" : "not_mentioned",
+    },
+    _issues: [],
+    _complete: true,
+    _fallback: true,
+    _rescheduleFallback: true,
+  };
+
+  if (item.time && !isLegalTime(item.time)) {
+    item.status.time = "failed";
+    item._issues.push("时间格式不合法：" + item.time);
+  }
+  if (item.location && locationHasActionWord(item.location)) {
+    item.status.location = "failed";
+    item._issues.push("地点疑似混入动作词：" + item.location);
+  }
+  if (item._issues.length > 0) item._complete = false;
+
+  return item;
+}
+
+// ---------- 整条通知兜底 ----------
+//
+// 【为什么要有这一段】
+// 真实踩过坑：学术讲座通知 / 时间 / 11月6日19点00 / 地点 / 图书馆三楼报告厅 /
+// 欢迎广大师生参加。整条被切成四句，事件名词在第一句，时间在第二句，
+// 地点在第三句，逐句判都不满足同句既有事件名词又有时间或地点，整条零事项。
+// 但整条合起来看三样都齐。海报转过来的通知大量是这种一行一字段的写法。
+//
+// 【怎么才安全】
+// 只在整条零事项时才走这一层（调用处已保证）；
+// 事件名词、时间、地点都必须在整条原文里真实出现，抽不到的字段留空并标原文未提及；
+// 纯告知三条必须拦住，一条都不能造出事项。
+
+// 日期表达式：只在抽不出时用整条文本兜。时间线索已在 FALLBACK_TIME_HINT。
+// 单独一条：X月X日[号]? 后可选时间。
+const WHOLE_DATE_RE = new RegExp(
+  "([0-9一二三四五六七八九十两]{1,4}月[0-9一二三四五六七八九十两]{1,3}[日号]?)"
+);
+
+// 时间表达式：X点[X分]，X:X 都认。取第一个。
+// 空格一律用字符类，不用反斜杠加字母。
+const WHOLE_TIME_RE = new RegExp(
+  "([0-9一二三四五六七八九十两]{1,2}[ ]*[点时][ ]*[0-9一二三四五六七八九十两]{0,2}[ ]*分?" +
+    "|[0-9]{1,2}:[0-9]{2})"
+);
+
+function buildWholeNoticeFallback(text, publishedAt, notice) {
+  const s = text == null ? "" : String(text);
+  if (!s) return null;
+
+  // 纯告知必须拦住
+  if (PURE_NOTICE_RE.test(s)) return null;
+
+  // 整条里必须有事件名词，否则不认
+  const noun = pickEventNoun(s);
+  if (!noun) return null;
+
+  const hasTime = FALLBACK_TIME_HINT.test(s);
+  const hasLoc = FALLBACK_LOC_HINT.test(s);
+  if (!hasTime && !hasLoc) return null;
+
+  // 整条抠日期：先试抽取模块，抠不到再正则兜
+  let local = null;
+  try {
+    local = extractNotice(s);
+  } catch (e) {
+    local = null;
+  }
+  if (!local) local = {};
+
+  let dateRaw = local.eventDate || local.deadline || null;
+  if (dateRaw == null) {
+    const dm = s.match(WHOLE_DATE_RE);
+    if (dm) dateRaw = dm[1];
+  }
+
+  let timeRaw = local.eventTime || local.time || null;
+  if (timeRaw == null) {
+    const tm = s.match(WHOLE_TIME_RE);
+    if (tm) timeRaw = String(tm[1]).replace(new RegExp("[" + SPACE_CLASS + "]", "g"), "");
+    // 19点00 归一成 19:00
+    const hm = timeRaw && timeRaw.match(
+      new RegExp("^([0-9一二三四五六七八九十两]{1,2})[点时]([0-9零一二三四五六七八九十]{0,2})分?$")
+    );
+    if (hm) {
+      const hh = hm[1];
+      const mmRaw = hm[2];
+      const mm = mmRaw ? mmRaw : "00";
+      const hhNum = hh.length === 1 ? "0" + hh : hh;
+      const mmNum = mm.length === 1 ? "0" + mm : mm;
+      timeRaw = hhNum + ":" + mmNum;
+    }
+  }
+  timeRaw = timeRaw == null ? null : String(timeRaw).trim() || null;
+
+  const endTimeRaw = local.eventEndTime || local.endTime || null;
+
+  let location = local.location || null;
+  if (!location) {
+    // 从 地点 XX 或 XX楼/厅/室/馆/场/中心 抠
+    // SPACE_CLASS 已含换行与回车，这里不必再单独写。
+    const locLine = s.match(
+      new RegExp("地点[：:，, ]?([^。；;！？" + SPACE_CLASS + "]{2,40})")
+    );
+    if (locLine) {
+      location = locLine[1].trim() || null;
+    } else {
+      const locRough = s.match(
+        new RegExp("([^。；;！？" + SPACE_CLASS + "]{2,20}(楼|厅|室|馆|场|中心|校区|教室|报告厅))")
+      );
+      if (locRough) location = locRough[1].trim() || null;
+    }
+  }
+  if (location && locationHasActionWord(location)) {
+    location = null;
+  }
+
+  const materials = [];
+  let audience = null;
+  if (local.audience) audience = local.audience;
+  else if (notice && notice.audience) audience = notice.audience;
+
+  const resolvedDate = dateRaw
+    ? resolveDateDisplay(String(dateRaw).trim(), publishedAt)
+    : { date: null, dateStatus: "not_mentioned" };
+
+  const name = "参加" + noun;
+  const evidence = buildItemEvidence(text, { text: s, start: 0 }, {
+    date: resolvedDate.dateStatus === "ok" ? resolvedDate.date : null,
+    dateText: dateRaw == null ? null : String(dateRaw).trim(),
+    time: timeRaw,
+    location: location,
+    materials: materials,
+  });
+
+  const item = {
+    key: buildKey(name, resolvedDate.date, timeRaw, 0),
+    seq: 0,
+    name: name,
+    kind: "event",
+    timeType: "start",
+    timeTypeLabel: "开始时间",
+    date: resolvedDate.date,
+    dateText: dateRaw == null ? null : String(dateRaw).trim(),
+    time: timeRaw,
+    endTime: endTimeRaw == null ? null : String(endTimeRaw).trim(),
+    location: location,
+    materials: materials,
+    suggestions: buildSuggestions(false, []),
+    audience: audience,
+    progress: "待办理",
+    dateStatus: resolvedDate.dateStatus,
+    evidence: evidence || null,
+    status: {
+      date: resolvedDate.dateStatus,
+      time: timeRaw ? "ok" : "not_mentioned",
+      endTime: endTimeRaw ? "ok" : "not_mentioned",
+      location: location ? "ok" : "not_mentioned",
+      materials: "not_applicable",
+      audience: audience ? "ok" : "not_mentioned",
+    },
+    _issues: [],
+    _complete: true,
+    _fallback: true,
+    _wholeFallback: true,
+  };
+
+  if (item.time && !isLegalTime(item.time)) {
+    item.status.time = "failed";
+    item._issues.push("时间格式不合法：" + item.time);
+  }
+  if (item.location && locationHasActionWord(item.location)) {
+    item.status.location = "failed";
+    item._issues.push("地点疑似混入动作词：" + item.location);
+  }
+  if (item._issues.length > 0) item._complete = false;
+
+  return item;
 }
 
 // ---------- 语义校验 ----------

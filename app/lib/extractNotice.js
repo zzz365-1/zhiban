@@ -230,6 +230,68 @@ function clauseAfterSlice(text, end) {
   return s;
 }
 
+// ---------- 改期句式 ----------
+//
+// 【要解决的原文】
+//   原定11月8日的助学金评审会调整至11月9日19点00，地点改为行政楼B201会议室。
+//   原定11月22日8点30的开幕式调整至11月23日9点00，地点改为体育馆主馆。
+//   延期至11月30日17点00。
+//   推迟到12月1日。
+//   改为12月2日。
+//
+// 【为什么原来抽不出来】
+// 11月9日前面是“调整至”，既不在 DEADLINE_MARKERS 里，也不在 EVENT_BEFORE_RE 里；
+// 后面紧跟的是“19点00”这种时间，DEADLINE_AFTER_RE 要求时间之后还要再来一个截止词，
+// 这里没有。所以 11/9 和 11/8 都判不出标志，两个下游都返回 null。
+// 11/8 反而因为“原定”二字出现在前面，在别的地方可能被当成活动日。
+//
+// 【认定规则，宁缺勿滥】
+// 只有出现下列改期引导词之一，且其后能找到一个日期候选，才认。
+// 引导词之后到下一个候选之前的这段窗口必须“干净”：
+//   不跨句末标点、不含第二个改期引导词、不含“原定/原计划/原安排”这类旧计划词。
+// 否则判为没把握，不当改期处理，退回原逻辑。
+// 这样原句里只有一个日期（例如只有“调整至11月9日”）时，
+// 仍然只返回那一个日期，不会凭空造第二个。
+const RESCHEDULE_LEAD = new RegExp(
+  "(?:调整(?:至|到|为)|延期(?:至|到)|推迟(?:至|到)|顺延(?:至|到)|" +
+    "改(?:为|至|到)|变更(?:为|至|到)|更新(?:为|至|到))[ ]*$"
+);
+
+// 旧计划词：出现在“原定/原计划…”里，代表后面的日期是作废的那一个。
+// 只在扫描改期引导词之后的窗口时用来做刹车，不参与别的判断。
+const OLD_PLAN_LEAD = new RegExp("(?:原定|原计划|原安排|原时间|原日程)");
+
+function findRescheduleDateCand(text, candidates) {
+  for (let i = 0; i < candidates.length; i++) {
+    const c = candidates[i];
+    // 看紧邻候选起点之前的那一小段，是不是改期引导词。
+    const nearBefore = text.slice(Math.max(0, c.index - 8), c.index);
+    if (!RESCHEDULE_LEAD.test(nearBefore)) continue;
+
+    // 引导词之前的这一小段窗口里，若夹着旧计划词或标点，说明这一处不是改写后的日期。
+    // 窗口宽度用近邻段，不整句扫，避免把“原定11月8日”里的旧计划词误当刹车。
+    const pre = text.slice(Math.max(0, c.index - 30), c.index);
+    const cut = Math.max(
+      pre.lastIndexOf("，"),
+      pre.lastIndexOf("。"),
+      pre.lastIndexOf("；"),
+      pre.lastIndexOf(";"),
+      pre.lastIndexOf(LF)
+    );
+    const window = cut === -1 ? pre : pre.slice(cut + 1);
+    if (OLD_PLAN_LEAD.test(window) && !RESCHEDULE_LEAD.test(window)) continue;
+
+    // 落款日期在新日期位置上也不能认，否则会把发文日当调整日。
+    if (isSignatureDate(text, c)) continue;
+    // 周期说法（每逢周一…）不能当调整日。
+    if (RECURRING_DATE.test(text.slice(Math.max(0, c.index - 6), c.index))) {
+      continue;
+    }
+    return c;
+  }
+  return null;
+}
+
 function extractDeadlineCandidate(text) {
   const candidates = findDateCandidates(text).filter((c) => {
     if (INCOMPLETE_DATE.test(c.text)) return false;
@@ -240,6 +302,12 @@ function extractDeadlineCandidate(text) {
     return true;
   });
   if (candidates.length === 0) return null;
+
+  // 【改期句式优先】原定X的…调整至Y，要认 Y，不要认 X。
+  // 直接返回 Y 作为截止日期，避免 Y 因为后面紧跟时间而没有截止标志被跳过。
+  const rescheduled = findRescheduleDateCand(text, candidates);
+  if (rescheduled) return rescheduled;
+
   for (const d of candidates) {
     const before = text.slice(Math.max(0, d.index - 15), d.index);
     const after = clauseAfterSlice(text, d.end);
@@ -304,6 +372,20 @@ function extractEventDateCandidate(text, deadlineCand) {
     if (RECURRING_DATE.test(nearBefore)) return false;
     return true;
   });
+
+  // 【改期句式优先】调整至的那天，如果和截止日期（此时就是同一个候选）不是同一天，
+  // 且满足改期引导词，就认它为活动日。
+  // 若改期后的日期就是截止日期（即 deadlineCand 就是那个调整后的日期），
+  // 这里跳过，避免活动日与截止日重复造两个。
+  const rescheduled = findRescheduleDateCand(text, candidates);
+  if (
+    rescheduled &&
+    !(deadlineCand && rescheduled.index === deadlineCand.index) &&
+    !(deadlineCand && deadlineCand.text === rescheduled.text)
+  ) {
+    return rescheduled;
+  }
+
   for (const c of candidates) {
     if (deadlineCand) {
       if (c.index === deadlineCand.index) continue;
@@ -415,6 +497,24 @@ function normalizeCjkTimeDigits(str) {
  * 所以先按标点切出这一句，再在句子里找。句子本身太长才退化成按字数截断。
  */
 function timeScopeFor(text, cand) {
+  // 改期句：起点直接挪到这个日期本身，往前一个字都不要。
+  // 【为什么】真实踩过坑：原定11月22日8点30的开幕式调整至11月23日9点00，地点改为体育馆主馆。
+  //   这一截没有逗号，往前回退二十个字把作废的 8点30 一起框进来，
+  //   先匹配到的就是它，时间显示成 08:30。
+  // 从 cand.index 起，作废时间落在窗口外，剩下的只有日期之后那段。
+  if (RESCHEDULE_LEAD.test(text.slice(Math.max(0, cand.index - 8), cand.index))) {
+    let end = text.length;
+    for (let i = cand.end; i < text.length; i++) {
+      if (CLAUSE_SPLIT.test(text[i])) {
+        end = i;
+        break;
+      }
+    }
+    // 步长仍按 25 收口，与下面的普通路径一致，避免句子太长吞进来。
+    if (end - cand.end > 25) end = cand.end + 25;
+    return text.slice(cand.index, Math.max(end, cand.end));
+  }
+
   let start = 0;
   for (let i = cand.index - 1; i >= 0; i--) {
     if (CLAUSE_SPLIT.test(text[i])) {
@@ -791,6 +891,17 @@ function cleanLocation(fragment) {
   // 抄到日历里读着别扭。冬季学生宿舍安全卫生检查这类写法，
   // 季节词会和地名粘在一起，也要剥掉，不然拿到的是冬季学生宿舍。
   s = s.replace(new RegExp("^[ ]*(?:在|于|至|到)[ ]*"), "");
+
+  // 剥掉开头的改期引导词。
+  // 【为什么需要】真实踩过坑：原定11月15日9点00的双选会调整至11月18日14点30，
+  // 地点改为体育馆主馆。从地点引导词后面取到的是 改为体育馆主馆，
+  // 界面上地点那一格显示成 改为体育馆主馆，读着别扭。
+  // 改期引导词和地点名不可能是同一个东西，剥掉整词，只留后面的地名。
+  // 只剥开头，地名中间出现这些字不动。
+  s = s.replace(
+    new RegExp("^[ ]*(?:调整(?:至|到|为)|延期(?:至|到)|推迟(?:至|到)|顺延(?:至|到)|改(?:为|至|到)|变更(?:为|至|到)|更新(?:为|至|到))[ ]*"),
+    ""
+  );
   s = s.replace(
     new RegExp("^[ ]*(?:冬季|夏季|春季|秋季|寒假|暑假|本次|本届|本期)[ ]*"),
     ""
@@ -1182,6 +1293,52 @@ function trimPunctuation(s) {
 }
 
 /**
+ * 非材料短语拦截表。
+ *
+ * 【为什么需要】
+ * 真实踩过坑：关于研究生奖学金材料报送的通知，请于12月12日16点30前将成绩单和
+ * 获奖证书复印件交至研究生院302室，逾期不再受理。
+ * 材料候选里有一条按「交/提交/报送/携带…」动词抓后面整段、再按顿号逗号切项的路径，
+ * 切完之后「逾期不再受理」成了一个独立候选，前面几道清洗规则都认不出它不是东西。
+ * 这条路径是为了补白名单认不出的真材料才加的（毛巾、一支黑色笔靠它救回来），
+ * 不能删，所以只能在清洗层加一道出口拦截：
+ * 明显是「过期怎么办/去哪看/有疑问找谁」这类说明性说法，一律不当作材料。
+ *
+ * 【放最后定稿前】
+ * 放在 cleanMaterialItem 的出口处判断，不管候选从哪条路径进来都能挡住。
+ *
+ * 【只挡整词，不做模糊匹配】
+ * 这些词本身不会出现在任何真材料名里，按整词包含判定即可，
+ * 不做前后缀拼凑，避免把含「通知」「放弃」字样的真表格误伤。
+ */
+const NON_MATERIAL_PHRASES = [
+  "逾期不再受理",
+  "逾期不候",
+  "逾期不予受理",
+  "恕不受理",
+  "不予受理",
+  "另行通知",
+  "详见通知",
+  "详见附件",
+  "如有疑问",
+  "如有异议",
+  "后果自负",
+  "视为放弃",
+  "视为自动放弃",
+  "自行承担",
+  "责任自负",
+  "过时不候",
+];
+
+function isNonMaterialPhrase(s) {
+  if (!s) return false;
+  for (const p of NON_MATERIAL_PHRASES) {
+    if (s.includes(p)) return true;
+  }
+  return false;
+}
+
+/**
  * 清洗单个材料名。
  *
  * 处理顺序有讲究：
@@ -1256,6 +1413,11 @@ function cleanMaterialItem(s) {
 
   if (t.length < 1 || t.length > 20) return null;
   if (LEADING_STOP_RE.test(t)) return null;
+
+  // 出口拦截：说明性说法不是要交的东西。
+  // 放在所有清洗之后、返回之前，任何路径进来的候选都会经过这里。
+  if (isNonMaterialPhrase(t)) return null;
+
   return t;
 }
 
@@ -1604,6 +1766,12 @@ function collectVerbListCandidates(text) {
     const body = stripParentheses(m[1]);
     const parts = body.split(new RegExp("[、,，]|以及|还有|和|及|与"));
     for (const p of parts) {
+      // 【标题行不收】
+      // 真实踩过坑：关于提交社会实践总结的通知 这种抬头里也有提交二字，
+      // 整条被拆成一项材料叫 社会实践总结的通知，界面上直接显示出来。
+      // 通知抬头一律跳过，材料只从正文里找。
+      const raw = String(p == null ? "" : p).trim();
+      if (new RegExp("^关于|通知$").test(raw)) continue;
       const item = cleanMaterialItem(p);
       if (item) results.push(item);
     }
@@ -1888,12 +2056,57 @@ export function extractNotice(text) {
   result.deadline = deadlineCand ? deadlineCand.text : null;
   const eventCand = extractEventDateCandidate(clean, deadlineCand);
   result.eventDate = eventCand ? eventCand.text : null;
-  result.eventTime = eventCand ? extractTime(clean, eventCand) : null;
-  result.time = extractTime(clean, deadlineCand);
-  result.eventEndTime = result.eventTime
-    ? extractTimeRangeEnd(clean, eventCand)
+  // 【时间跟着改期走】
+  // 原定11月22日8点30的开幕式调整至11月23日9点00。
+  // 原来 eventCand 为 null，eventTime 直接 null；
+  // deadlineCand 为 null 时 extractTime 全文找第一个时间，拿到的是作废的 8点30。
+  // 现在：只要抽出改期后的日期，就用它的小句范围取时间；取不到就当没有，
+  // 绝不能退到全文找第一个时间，那会把作废时间端上来。
+  const rescheduledCand = findRescheduleDateCand(clean, findDateCandidates(clean));
+  const oldEventTime = eventCand ? extractTime(clean, eventCand) : null;
+  const reschedTime = rescheduledCand
+    ? extractTime(clean, rescheduledCand)
     : null;
-  result.endTime = result.time ? extractTimeRangeEnd(clean, deadlineCand) : null;
+
+  // 【取不到就空，不许回退到作废时间】
+  // 改期句的日期不是 eventCand，而是 rescheduledCand。
+  // 上一版这里 eventCand 为 null 时就落到 reschedTime，
+  // 而 reschedTime 的窗口收了作废的 8点30，于是填回 08:30。
+  // 现在：有 eventCand 用 eventCand 的时间；否则，只有日期本身就是改期后的那个候选时
+  // 才用 reschedTime（此时 timeScopeFor 已从该日期起算，作废时间不会进来），
+  // 两个都不是就留空。
+  if (eventCand) {
+    result.eventTime = oldEventTime;
+  } else if (
+    rescheduledCand &&
+    deadlineCand &&
+    rescheduledCand.index === deadlineCand.index
+  ) {
+    result.eventTime = null;
+  } else if (rescheduledCand) {
+    result.eventTime = reschedTime;
+  } else {
+    result.eventTime = null;
+  }
+
+  if (deadlineCand) {
+    result.time = extractTime(clean, deadlineCand);
+  } else if (rescheduledCand) {
+    // 改期句：活动时间放在 eventTime，截止时间这一格留空，不许串台。
+    result.time = null;
+  } else {
+    result.time = extractTime(clean, null);
+  }
+  // 时间区间结束那一头也要跟着锚点走：
+  // 改期句里 eventTime 有值但 eventCand 为 null，原来会拿 null 去全文扫区间，
+  // 把旧区间（如 8点30-9点00）当新活动的结束时间。
+  const eventAnchor = eventCand || (result.eventTime ? rescheduledCand : null);
+  result.eventEndTime = result.eventTime
+    ? extractTimeRangeEnd(clean, eventAnchor)
+    : null;
+  result.endTime = result.time
+    ? extractTimeRangeEnd(clean, deadlineCand || rescheduledCand)
+    : null;
   result.location = extractLocation(clean);
   result.materials = extractMaterials(clean);
   result.audience = extractAudience(clean);

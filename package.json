@@ -18,6 +18,7 @@
     "test:round1": "node scripts/test-round1.mjs",
     "test:round2": "node scripts/test-round2.mjs",
     "test:round3": "node scripts/test-round3.mjs",
+    "test:round4": "node scripts/test-round4.mjs",
     "test:extract": "node scripts/test-extract.mjs",
     "test:location": "node scripts/test-location.mjs",
     "test:calendar": "node scripts/test-calendar.mjs",
