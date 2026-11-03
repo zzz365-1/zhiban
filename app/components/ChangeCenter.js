@@ -152,6 +152,20 @@ export default function ChangeCenter({
                     {success.title}
                   </div>
                 )}
+
+                {Object.prototype.hasOwnProperty.call(success, "alertCount") && (
+                  <div className="mt-1.5 text-[11px] leading-relaxed text-[#64748B]">
+                    {success.alertCount > 0
+                      ? "提醒已按新安排重新计算，当前这一条通知上有 " +
+                        success.alertCount +
+                        " 条提醒" +
+                        (success.alertTopTitle
+                          ? "、" + success.alertTopTitle
+                          : "") +
+                        "。"
+                      : "提醒已按新安排重新计算，当前这一条通知上没有需要提醒的事项。"}
+                  </div>
+                )}
               </div>
 
               <button

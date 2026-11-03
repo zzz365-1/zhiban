@@ -18,6 +18,7 @@ import MultiResultPanel from "./components/MultiResultPanel";
 import { buildDeadlineDate } from "./lib/deadline.js";
 import { getTodoItems } from "./lib/todo.js";
 import { buildRouteEvents } from "./lib/routeEvents.js";
+import { buildScheduleAlerts } from "./lib/conflict.js";
 import { updateNoticeAnalysis } from "./lib/noticeOps.js";
 import { parseOne } from "./lib/parseOne.js";
 import { isDuplicate, splitNotices } from "./lib/splitNotices.js";
@@ -234,6 +235,8 @@ export default function Home() {
   const filtered = filterNotices(notices, searchQuery, categoryFilter);
   // 日历和待办都从事项摊平出来的同一份事件走，改了事项两边一起变
   const routeEvents = buildRouteEvents(filtered);
+  // 全页面只算这一份提醒，工作台和日历都用它，两边显示的才会一致
+  const scheduleAlerts = buildScheduleAlerts(routeEvents);
   const todoItems = getTodoItems(routeEvents, now);
   // 工作台三组数据：待确认单独算，即将截止就是待办那一份，待办理取全部未办的按时间排序
   const pendingItems = buildPendingItems(filtered);
@@ -701,6 +704,46 @@ export default function Home() {
     setPatchStep("review");
   }
 
+  // 补结束时间：只改这一条通知的这一个事项的结束时间，开始时间、日期、其它事项一概不碰。
+  // 事项存两处，必须用同一份新数组同时写回最外层 items 和分析结果里的 items。
+  function handleFillEndTime(noticeId, itemIndex, endTime) {
+    const value = typeof endTime === "string" ? endTime.trim() : "";
+    const m = /^([0-9]{2}):([0-9]{2})$/.exec(value);
+    if (!m) return;
+    const hh = Number(m[1]);
+    const mm = Number(m[2]);
+    if (hh < 0 || hh > 23 || mm < 0 || mm > 59) return;
+
+    setNotices((prev) =>
+      prev.map((n) => {
+        if (n.id !== noticeId) return n;
+        const list = ((n.analysis && n.analysis.items) || n.items || []).slice();
+        const target = list[itemIndex];
+        if (!target) return n;
+
+        // 结束时间不能早于或等于开始时间，否则可能是跨午夜或填错，宁可不写
+        const startTime = target.time || "";
+        const sm = /^([0-9]{2}):([0-9]{2})$/.exec(startTime);
+        if (sm) {
+          const startMinutes = Number(sm[1]) * 60 + Number(sm[2]);
+          const endMinutes = hh * 60 + mm;
+          if (endMinutes <= startMinutes) return n;
+        }
+
+        const next = {
+          ...target,
+          endTime: value,
+          status: {
+            ...(target.status || {}),
+            endTime: value ? "ok" : "not_mentioned",
+          },
+        };
+        list[itemIndex] = next;
+        return { ...n, items: list, analysis: { ...n.analysis, items: list } };
+      })
+    );
+  }
+
   function handlePatchConfirm() {
     const notice = notices.find((n) => n.id === patchNoticeId);
     if (!notice || !patchDraft) return;
@@ -727,11 +770,25 @@ export default function Home() {
     const affectedNames = (Array.isArray(patchIndexes) ? patchIndexes : [])
       .map((i) => (items[i] ? items[i].name : null))
       .filter(Boolean);
+    // 只针对这一条改完的通知重算提醒，让用户看到新安排下的提醒状况
+    const patchedAlerts = buildScheduleAlerts(
+      buildRouteEvents(
+        notices
+          .filter((n) => n.id === patchNoticeId)
+          .map((n) => ({
+            ...n,
+            items: nextItems,
+            analysis: { ...n.analysis, items: nextItems },
+          }))
+      )
+    );
     setPatchSuccess({
       noticeId: notice.id,
       title: notice.title,
       itemNames: affectedNames,
       changes: Array.isArray(record.changes) ? record.changes : [],
+      alertCount: patchedAlerts.length,
+      alertTopTitle: patchedAlerts.length > 0 ? patchedAlerts[0].title : "",
     });
     setView("changes");
 
@@ -894,6 +951,8 @@ export default function Home() {
                 onToggleMaterial={handleToggleEventMaterial}
                 onFocusStat={handleFocusStat}
                 onCreate={handleOpenNew}
+                alerts={scheduleAlerts}
+                onFillEndTime={handleFillEndTime}
               />
             </div>
           )}
@@ -999,6 +1058,8 @@ export default function Home() {
                 notices={filtered}
                 now={now}
                 onOpenItem={handleOpenItem}
+                alerts={scheduleAlerts}
+                onFillEndTime={handleFillEndTime}
               />
             </div>
           )}

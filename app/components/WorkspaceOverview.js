@@ -8,6 +8,7 @@ import {
   IconPlus,
 } from "./ui/Icons.js";
 import ItemCard from "./ItemCard.js";
+import ScheduleAlerts from "./ScheduleAlerts.js";
 
 const WEEKDAYS = ["日", "一", "二", "三", "四", "五", "六"];
 
@@ -57,6 +58,8 @@ export default function WorkspaceOverview({
   onToggleMaterial,
   onFocusStat,
   onCreate,
+  alerts,
+  onFillEndTime,
 }) {
   const safeNow = typeof now === "number" ? now : Date.now();
   const safeGroups = groups || {};
@@ -119,6 +122,27 @@ export default function WorkspaceOverview({
         </p>
       </div>
 
+      {/* 提醒区：alerts 为空时整块不渲染 */}
+      {Array.isArray(alerts) && alerts.length > 0 ? (
+        <div className="mb-6">
+          <SectionTitle>需要关注</SectionTitle>
+          <ScheduleAlerts
+            alerts={alerts}
+            onOpenItem={(noticeId, itemIndex) => {
+              if (!onOpenItem) return;
+              const all = pending.concat(soon).concat(todo);
+              const ev = all.find(
+                (e) =>
+                  String(e.noticeId) === String(noticeId) &&
+                  String(e.itemIndex) === String(itemIndex)
+              );
+              if (ev) onOpenItem(ev);
+            }}
+            onFillEndTime={onFillEndTime}
+          />
+        </div>
+      ) : null}
+
       {/* 统计卡 */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         {STAT_CARDS.map(({ key, label, Icon, tone }) => {
@@ -180,6 +204,7 @@ export default function WorkspaceOverview({
                       event={event}
                       now={safeNow}
                       selected={!!selectedKey && selectedKey === k}
+                      alerts={alerts}
                       onOpen={
                         onOpenItem ? () => onOpenItem(event) : undefined
                       }

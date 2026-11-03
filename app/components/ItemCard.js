@@ -7,6 +7,7 @@ import {
   IconFile,
   IconList,
   IconCheck,
+  IconAlert,
 } from "./ui/Icons.js";
 
 const DAY_MS = 86400000;
@@ -71,6 +72,7 @@ export default function ItemCard({
   onOpen,
   onComplete,
   onToggleMaterial,
+  alerts,
 }) {
   if (!event) return null;
 
@@ -96,6 +98,49 @@ export default function ItemCard({
   const handleComplete = () => {
     if (!onComplete) return;
     onComplete(isDone ? "待办理" : "已办理");
+  };
+
+  // ---- 本事项相关的提醒，只取最严重的一条 ----
+  // 只显示一行标签，完整内容在日历和工作台的提醒区展开，
+  // 不然同一个警告会在页面上叠出好几遍。
+  const RELATED_ORDER = { overlap: 0, cluster: 1, needEndTime: 2 };
+  let relatedAlert = null;
+  if (Array.isArray(alerts) && event) {
+    for (const a of alerts) {
+      const its = Array.isArray(a.items) ? a.items : [];
+      const hit = its.some(
+        (it) =>
+          String(it.noticeId) === String(event.noticeId) &&
+          String(it.itemIndex) === String(event.itemIndex)
+      );
+      if (!hit) continue;
+      const rankA = RELATED_ORDER[a.type] == null ? 9 : RELATED_ORDER[a.type];
+      const rankB =
+        relatedAlert == null ? 9 : RELATED_ORDER[relatedAlert.type] == null
+          ? 9
+          : RELATED_ORDER[relatedAlert.type];
+      if (relatedAlert === null || rankA < rankB) {
+        relatedAlert = a;
+      }
+    }
+  }
+
+  const ALERT_TAG_CONF = {
+    overlap: {
+      label: "时间冲突",
+      Icon: IconAlert,
+      cls: "border-amber-200 bg-amber-50 text-amber-800",
+    },
+    cluster: {
+      label: "截止事项集中",
+      Icon: IconList,
+      cls: "border-blue-200 bg-blue-50 text-blue-800",
+    },
+    needEndTime: {
+      label: "结束时间待补充",
+      Icon: IconClock,
+      cls: "border-blue-200 bg-blue-50 text-blue-800",
+    },
   };
 
   return (
@@ -235,6 +280,42 @@ export default function ItemCard({
             </div>
           ) : null}
         </div>
+
+        {/* 相关提醒：只显示一行，不可点，完整内容去日历和工作台看 */}
+        {relatedAlert
+          ? (function () {
+              const conf =
+                ALERT_TAG_CONF[relatedAlert.type] ||
+                ALERT_TAG_CONF.needEndTime;
+              const TagIcon = conf.Icon;
+              return (
+                <div className="mt-2.5">
+                  <span
+                    className={[
+                      "inline-flex max-w-full items-center gap-1.5 rounded-[6px] border px-2 py-0.5 text-[11px]",
+                      conf.cls,
+                    ].join(" ")}
+                  >
+                    <TagIcon size={12} className="flex-none" />
+                    {(() => {
+                      const t = relatedAlert.title || conf.label;
+                      const same = t === conf.label;
+                      return (
+                        <>
+                          <span className="truncate font-medium">{t}</span>
+                          {same ? null : (
+                            <span className="flex-none opacity-80">
+                              · {conf.label}
+                            </span>
+                          )}
+                        </>
+                      );
+                    })()}
+                  </span>
+                </div>
+              );
+            })()
+          : null}
 
         {/* 操作区 */}
         <div className="mt-4 flex items-center justify-between gap-3">

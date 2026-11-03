@@ -5,6 +5,7 @@ import { buildMonthGrid, formatDateKey } from "../lib/calendar.js";
 import { buildRouteEvents } from "../lib/routeEvents.js";
 import { formatRemaining } from "../lib/todo.js";
 import { StatusPill, EmptyState } from "./ui/ZbUI.js";
+import ScheduleAlerts from "./ScheduleAlerts.js";
 import {
   IconChevronRight,
   IconClock,
@@ -31,7 +32,13 @@ function dotClass(level) {
   return "bg-blue-600";
 }
 
-export default function CalendarPage({ notices, now, onOpenItem }) {
+export default function CalendarPage({
+  notices,
+  now,
+  onOpenItem,
+  alerts,
+  onFillEndTime,
+}) {
   const today = new Date(typeof now === "number" ? now : Date.now());
   const [viewYear, setViewYear] = useState(today.getFullYear());
   const [viewMonth, setViewMonth] = useState(today.getMonth());
@@ -82,6 +89,19 @@ export default function CalendarPage({ notices, now, onOpenItem }) {
   }
 
   const selectedItems = selectedKey ? byDate[selectedKey] || [] : [];
+
+  // 只保留与当天事项相关的提醒，和事项卡片看的是同一份数据
+  const selectedItemKeys = new Set(
+    selectedItems.map((ev) => String(ev.noticeId) + "|" + String(ev.itemIndex))
+  );
+  const dayAlerts = Array.isArray(alerts)
+    ? alerts.filter((a) => {
+        const its = Array.isArray(a.items) ? a.items : [];
+        return its.some((it) =>
+          selectedItemKeys.has(String(it.noticeId) + "|" + String(it.itemIndex))
+        );
+      })
+    : [];
 
   let selectedDateLabel = "选择一天";
   if (selectedKey) {
@@ -258,6 +278,27 @@ export default function CalendarPage({ notices, now, onOpenItem }) {
         <p className="mt-1 text-xs text-[#64748B]">
           这一天一共有 {selectedItems.length} 条事项
         </p>
+
+        {selectedKey && dayAlerts.length > 0 ? (
+          <section className="mt-4">
+            <h3 className="mb-2 text-[13px] font-bold tracking-wide text-[#64748B]">
+              这一天的提醒
+            </h3>
+            <ScheduleAlerts
+              alerts={dayAlerts}
+              onOpenItem={(noticeId, itemIndex) => {
+                if (!onOpenItem) return;
+                const ev = selectedItems.find(
+                  (e) =>
+                    String(e.noticeId) === String(noticeId) &&
+                    String(e.itemIndex) === String(itemIndex)
+                );
+                if (ev) onOpenItem(ev);
+              }}
+              onFillEndTime={onFillEndTime}
+            />
+          </section>
+        ) : null}
 
         {selectedItems.length === 0 ? (
           <div className="mt-4">
