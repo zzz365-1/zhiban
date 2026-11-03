@@ -1,37 +1,54 @@
-/**
- * 旧通知数据迁移。
- *
- * 【为什么必须有这一层】
- * 事项是后加的，老数据只有一份扁平字段。
- * 直接丢掉老数据不行，用户存过的通知一条都不能少。
- * 所以读取时补出 items，原有字段原样保留，只加一个 schemaVersion 标记。
- */
+// app/lib/noticeMigrate.js
+// 老通知迁移：把没有事项字段的旧通知补出 items，其余字段一律原样保留。
 
 import { buildItems } from "./noticeItems.js";
 
-export const SCHEMA_VERSION = 2;
+const CURRENT_SCHEMA_VERSION = 2;
 
-export function migrateNotice(notice) {
-  if (!notice || typeof notice !== "object") return notice;
-
-  const already = notice.schemaVersion === SCHEMA_VERSION;
-  const hasItems = Array.isArray(notice.items) && notice.items.length > 0;
-  if (already && hasItems) return notice;
-
-  const items = hasItems
-    ? notice.items
-    : buildItems(notice.text || "", {
-        publishedAt: notice.publishedAt || null,
-      });
-
-  return {
-    ...notice,
-    items,
-    schemaVersion: SCHEMA_VERSION,
-  };
+// 是否需要迁移：有 items 字段视为新结构；schemaVersion >= 2 也视为新结构。
+function needsMigrate(n) {
+  if (!n || typeof n !== "object") return false;
+  if (Object.prototype.hasOwnProperty.call(n, "items")) return false;
+  if (
+    typeof n.schemaVersion === "number" &&
+    n.schemaVersion >= CURRENT_SCHEMA_VERSION
+  ) {
+    return false;
+  }
+  return true;
 }
 
+// 单条迁移。不修改入参，返回新对象；不需要迁移时原样返回入参。
+export function migrateNotice(n) {
+  if (!n || typeof n !== "object") return n;
+  if (!needsMigrate(n)) return n;
+
+  const out = {};
+  const keys = Object.keys(n);
+  for (let i = 0; i < keys.length; i++) {
+    out[keys[i]] = n[keys[i]];
+  }
+
+  let items = [];
+  try {
+    const text = n.text == null ? "" : String(n.text);
+    const built = buildItems(text);
+    items = Array.isArray(built) ? built : [];
+  } catch (e) {
+    items = [];
+  }
+
+  out.items = items;
+  out.schemaVersion = CURRENT_SCHEMA_VERSION;
+  return out;
+}
+
+// 整表迁移。条数不变，顺序不变。
 export function migrateNotices(list) {
   if (!Array.isArray(list)) return [];
-  return list.map(migrateNotice);
+  const out = [];
+  for (let i = 0; i < list.length; i++) {
+    out.push(migrateNotice(list[i]));
+  }
+  return out;
 }

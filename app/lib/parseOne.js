@@ -35,30 +35,31 @@ import {
   isFuzzyDate,
 } from "./aiExtract.js";
 import { resolveRelativeDate, normalizeChineseDate } from "./relativeDate.js";
-import { buildItems } from "./noticeItems.js";
 
-export async function parseOne(text, options) {
-  const opt = options || {};
-  const publishedAt = opt.publishedAt ? new Date(opt.publishedAt) : null;
-  const now = new Date();
+export async function parseOne(text, options = {}) {
+  // 基准日期：有发布日期就按发布日期算，没有就不算相对日期。
+  // 没传 options 或没传 publishedAt 时，publishedAt 为 undefined。
+  const publishedAt = options?.publishedAt ? new Date(options.publishedAt) : null;
+  const hasBase = publishedAt instanceof Date && !Number.isNaN(publishedAt.getTime());
   // 中文数字写的日期先换成阿拉伯数字，本地规则和模型才认得。
   // 只影响抽取用的文本，界面上展示给用户的原文不动。
   const workText = normalizeChineseDate(text);
   const ruleResult = extractNotice(workText);
 
-  // 相对日期必须有基准。给了发布日期就按发布日期算，
-  // 没给就挂起标待确认，不许默默按今天算，用户会被一个假日期带偏。
+  // 本地优先换算相对日期
   if (ruleResult.deadline && isFuzzyDate(ruleResult.deadline)) {
-    if (publishedAt) {
+    if (hasBase) {
       const resolved = resolveRelativeDate(ruleResult.deadline, publishedAt);
       if (resolved) {
         ruleResult.deadline = resolved.normalized;
         ruleResult._locallyResolved = true;
         ruleResult._datePending = false;
       } else {
+        // 有基准但换算失败：保留原文词，标记待确认
         ruleResult._datePending = true;
       }
     } else {
+      // 没有基准：保留原文词，标记待确认
       ruleResult._datePending = true;
     }
   }
@@ -67,27 +68,30 @@ export async function parseOne(text, options) {
   // 换不出来就原样留着，不因为活动日期模糊就去调模型，
   // 调不调模型只看截止日期和地点，这条判断不能改。
   if (ruleResult.eventDate && isFuzzyDate(ruleResult.eventDate)) {
-    const resolvedEvent = resolveRelativeDate(ruleResult.eventDate, now);
-    if (resolvedEvent) {
-      ruleResult.eventDate = resolvedEvent.normalized;
+    if (hasBase) {
+      const resolvedEvent = resolveRelativeDate(ruleResult.eventDate, publishedAt);
+      if (resolvedEvent) {
+        ruleResult.eventDate = resolvedEvent.normalized;
+      }
     }
+    // 换不出来（无基准或换算失败）就原样留着，是否调模型仍只看 deadline 和 location，这条判断不能改。
   }
 
   if (isRuleResultGood(ruleResult)) {
-    const analysis = { ...ruleResult, _source: "rule" };
-    return {
-      analysis,
-      items: buildItems(text, { publishedAt }),
-    };
+    if (ruleResult._datePending === undefined) {
+      // deadline 不是相对说法（精确日期或无 deadline）：没有待确认的相对日期
+      ruleResult._datePending = false;
+    }
+    return { analysis: { ...ruleResult, _source: "rule" } };
   }
 
   try {
     const aiResult = await callAIExtract(workText);
     const merged = mergeAIResult(ruleResult, aiResult, workText);
 
-    // AI 返回的 deadline 如果仍是相对日期，同样按发布日期换算，没基准就挂起
+    // AI 返回的 deadline 如果仍是相对日期，本地再换算一次
     if (merged.deadline && isFuzzyDate(merged.deadline)) {
-      if (publishedAt) {
+      if (hasBase) {
         const resolved = resolveRelativeDate(merged.deadline, publishedAt);
         if (resolved) {
           merged.deadline = resolved.normalized;
@@ -102,21 +106,23 @@ export async function parseOne(text, options) {
       }
     }
 
-    return {
-      analysis: merged,
-      items: buildItems(text, { publishedAt }),
-    };
+    if (merged._datePending === undefined) {
+      merged._datePending = false;
+    }
+    return { analysis: merged };
   } catch (e) {
     const code = e?.code || "ai_failed";
     const message = String(e?.message || e);
+    const pending =
+      ruleResult._datePending === undefined ? false : ruleResult._datePending;
     return {
       analysis: {
         ...ruleResult,
+        _datePending: pending,
         _source: "rule_fallback",
         _aiErrorCode: code,
         _aiErrorMessage: message,
       },
-      items: buildItems(text, { publishedAt }),
       error: { code, message },
     };
   }

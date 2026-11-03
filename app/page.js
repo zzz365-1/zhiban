@@ -10,8 +10,6 @@ import CalendarView from "./components/CalendarView";
 import ShareDialog from "./components/ShareDialog";
 import MultiSplitDialog from "./components/MultiSplitDialog";
 import MultiResultPanel from "./components/MultiResultPanel";
-import ItemsPanel from "./components/ItemsPanel";
-import DuplicateDialog from "./components/DuplicateDialog";
 import { buildDeadlineDate } from "./lib/deadline.js";
 import { getTodoItems } from "./lib/todo.js";
 import { updateNoticeAnalysis } from "./lib/noticeOps.js";
@@ -19,9 +17,11 @@ import { parseOne } from "./lib/parseOne.js";
 import { isDuplicate, splitNotices } from "./lib/splitNotices.js";
 import { checkModeMismatch } from "./lib/modeGuard.js";
 import { buildSampleNotices } from "./lib/sampleNotices.js";
-import { migrateNotices } from "./lib/noticeMigrate.js";
-import { buildItems, applyItemPatch } from "./lib/noticeItems.js";
-import { checkDuplicate, dedupeItems } from "./lib/dedupe.js";
+import ItemsPanel from "./components/ItemsPanel";
+import DuplicateDialog from "./components/DuplicateDialog";
+import { buildItems } from "./lib/noticeItems.js";
+import { migrateNotice } from "./lib/noticeMigrate.js";
+import { checkDuplicate } from "./lib/dedupe.js";
 
 const STORAGE_KEY = "zhiban.notices.v1";
 
@@ -75,16 +75,6 @@ export default function Home() {
   const [selectedId, setSelectedId] = useState(null);
   const [noticeText, setNoticeText] = useState("");
   const [analysis, setAnalysis] = useState(null);
-  // 事项是后加的一层，一条通知可以有好几件事。
-  // 和 analysis 分开存，analysis 保留原来的扁平字段，老数据不丢。
-  const [items, setItems] = useState([]);
-  // 原文改过之后旧结果就不是这次原文的结果了，标出来重新解析，不能继续当有效值用。
-  const [dirty, setDirty] = useState(false);
-  // 通知发布日期。相对日期明天这类说法靠它换算，没有它就不换算。
-  const [publishedAt, setPublishedAt] = useState("");
-  const [duplicate, setDuplicate] = useState({ open: false, type: "", notice: null });
-  // 用户看过重复提示后仍然要导入，这一条放行一次，下一条重新拦。
-  const [allowDuplicate, setAllowDuplicate] = useState(false);
   const [parsing, setParsing] = useState(false);
   const [activeTab, setActiveTab] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
@@ -102,13 +92,20 @@ export default function Home() {
   });
   const [batchResults, setBatchResults] = useState([]);
 
+  // 原文动过但还没重新解析：结果区提示、禁止保存
+  const [dirty, setDirty] = useState(false);
+  // 命中去重弹窗时的暂存
+  const [duplicate, setDuplicate] = useState(null);
+  // 用户选择仍然导入后放行，直到保存完成才清掉，
+  // 否则保存时又被查一次重复，陷入循环
+  const [allowDuplicate, setAllowDuplicate] = useState(false);
+
   useEffect(() => {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw);
-        // 老数据没有事项，读进来的时候补出来，原有字段一条不动。
-        if (Array.isArray(parsed)) setNotices(migrateNotices(parsed));
+        if (Array.isArray(parsed)) setNotices(parsed.map(migrateNotice));
       }
     } catch (e) {
       console.warn("读取本地通知失败：", e);
@@ -152,11 +149,6 @@ export default function Home() {
   const displayAnalysis = selectedId
     ? selectedNotice?.analysis ?? null
     : analysis;
-  // 选中已保存的通知就看它的事项，没选中就看刚解析出来的那一份。
-  // 列表选中项 详情 原文 解析结果必须指同一条通知，不能各看各的。
-  const displayItems = selectedId
-    ? selectedNotice?.items ?? []
-    : items;
 
   function handleHighlightSpan(span) {
     const el = document.getElementById("notice-text");
@@ -177,19 +169,16 @@ export default function Home() {
   function handleSelect(id) {
     const target = notices.find((n) => n.id === id);
     if (!target) return;
-    // 点已保存的通知就是要看这条的详情。
-    // 批量模式的残留结果和模式切换提示都得清掉，不然详情还没看到先弹一个框。
-    setBatchResults([]);
-    setSplitDialog({ open: false, items: [], reason: "" });
-    setInputMode("single");
-    setWarningDismissed(true);
-    setWarningCandidate(null);
     setSelectedId(id);
     setNoticeText(target.text);
     setAnalysis(target.analysis);
-    setItems(target.items || []);
-    setPublishedAt(target.publishedAt || "");
+    // 点已存通知时把上次批量的残留和模式提示都清掉
+    setBatchResults([]);
+    setSplitDialog({ open: false, items: [], reason: "" });
+    setWarningCandidate(null);
+    setWarningDismissed(true);
     setDirty(false);
+    setAllowDuplicate(false);
   }
 
   function handleDelete(id) {
@@ -201,15 +190,22 @@ export default function Home() {
     }
   }
 
-  async function handleParse(options) {
+  async function handleParse() {
     const text = noticeText.trim();
-    const bypass =
-      Boolean(options && options.bypassDuplicate === true) || allowDuplicate;
     if (!text) {
       alert("请先粘贴或输入通知原文，再点击解析。");
       return;
     }
     setSelectedId(null);
+
+    // 单条模式先查重：命中就弹窗，别直接开跑
+    if (inputMode !== "multi" && !allowDuplicate) {
+      const dup = checkDuplicate(text, notices);
+      if (dup && dup.type !== "none") {
+        setDuplicate(dup);
+        return;
+      }
+    }
 
     // 多通知先弹窗确认分法，不直接开跑。
     // 切不出来也要弹，闷声不响用户以为程序坏了。
@@ -229,29 +225,31 @@ export default function Home() {
       return;
     }
 
-    // 重复导入先拦一道。正文一样会提示已经导入过，
-    // 标题一样正文不一样会提示标题重复，由用户决定要不要再导一条。
-    if (!bypass) {
-      const dup = checkDuplicate(text, notices);
-      if (dup.type !== "none") {
-        setDuplicate({ open: true, type: dup.type, notice: dup.notice });
-        return;
-      }
-    }
-    // 用户明确选了仍然导入，这个放行要留到保存那一关。
-    // 不然解析完再点保存又会被同一个提示拦一次，来回弹。
-    if (!(options && options.bypassDuplicate === true)) setAllowDuplicate(false);
-
     setParsing(true);
-    const result = await parseOne(text, { publishedAt: publishedAt || null });
-    setAnalysis(result.analysis);
-    setItems(result.items || []);
+    const result = await parseOne(text);
+    const withItems = {
+      ...result.analysis,
+      items: buildItems(text),
+    };
+    setAnalysis(withItems);
     setDirty(false);
     setParsing(false);
   }
 
-  async function retryParse() {
-    await handleParse({ bypassDuplicate: true });
+  function handleDuplicateView(notice) {
+    setDuplicate(null);
+    handleSelect(notice.id);
+  }
+
+  function handleDuplicateImport() {
+    // 放行状态一直保留到保存完成，避免保存时二次查重
+    setAllowDuplicate(true);
+    setDuplicate(null);
+    handleParse();
+  }
+
+  function handleDuplicateCancel() {
+    setDuplicate(null);
   }
 
   async function handleConfirmSplit(kept) {
@@ -260,23 +258,16 @@ export default function Home() {
     const results = [];
     for (const t of kept) {
       if (isDuplicate(t, notices)) {
-        results.push({
-          text: t,
-          status: "duplicate",
-          analysis: null,
-          items: [],
-          errorMsg: "这条已经导入过，已跳过",
-        });
+        results.push({ text: t, status: "duplicate", analysis: null, errorMsg: "" });
         continue;
       }
       try {
-        const r = await parseOne(t, { publishedAt: publishedAt || null });
+        const r = await parseOne(t);
         const src = r.analysis._source;
         results.push({
           text: t,
           status: src === "rule_fallback" ? "fallback" : "success",
           analysis: r.analysis,
-          items: r.items || [],
           errorMsg: r.error ? String(r.error.message || r.error.code || "") : "",
         });
       } catch (e) {
@@ -284,7 +275,6 @@ export default function Home() {
           text: t,
           status: "error",
           analysis: null,
-          items: [],
           errorMsg: String(e?.message || e),
         });
       }
@@ -297,11 +287,13 @@ export default function Home() {
     setSplitDialog({ open: false, items: [], reason: "" });
     setInputMode("single");
     setParsing(true);
-    const result = await parseOne(noticeText.trim(), {
-      publishedAt: publishedAt || null,
-    });
-    setAnalysis(result.analysis);
-    setItems(result.items || []);
+    const singleText = noticeText.trim();
+    const result = await parseOne(singleText);
+    const withItems = {
+      ...result.analysis,
+      items: buildItems(singleText),
+    };
+    setAnalysis(withItems);
     setDirty(false);
     setParsing(false);
   }
@@ -311,10 +303,9 @@ export default function Home() {
       (it.status === "success" || it.status === "fallback") && it.analysis
   ).length;
 
-  function handleSave(options) {
-    const bypass =
-      Boolean(options && options.bypassDuplicate === true) || allowDuplicate;
-
+  function handleSave() {
+    // 原文改过还没重解析，不许存
+    if (dirty) return;
     if (inputMode === "multi") {
       handleBatchSave(
         batchResults
@@ -323,28 +314,12 @@ export default function Home() {
               (it.status === "success" || it.status === "fallback") &&
               it.analysis
           )
-          .map((it) => ({
-            text: it.text,
-            analysis: it.analysis,
-            items: it.items || [],
-          }))
+          .map((it) => ({ text: it.text, analysis: it.analysis }))
       );
       setBatchResults([]);
       return;
     }
     if (!analysis || selectedId) return;
-
-    // 保存前再查一次。解析之后又导入过一遍的情况也得拦住，
-    // 不然同一件事会在日历里出现两次。
-    if (!bypass) {
-      const dup = checkDuplicate(noticeText, notices);
-      if (dup.type !== "none") {
-        setDuplicate({ open: true, type: dup.type, notice: dup.notice });
-        return;
-      }
-    }
-    setAllowDuplicate(false);
-
     const deadlineDate = buildDeadlineDate(analysis.deadline, analysis.time);
     const notice = {
       id: makeId(),
@@ -352,66 +327,52 @@ export default function Home() {
       source: sourceLabel(analysis._source),
       text: noticeText,
       analysis,
-      items: dedupeItems(items),
-      publishedAt: publishedAt || null,
-      schemaVersion: 2,
+      items: analysis.items || buildItems(noticeText),
       deadlineDate: deadlineDate ? deadlineDate.getTime() : null,
       savedAt: Date.now(),
     };
     setNotices((prev) => [notice, ...prev]);
     setSelectedId(notice.id);
     setDirty(false);
-    // 一次性放行用完就收，下一条通知重新按重复规则拦。
     setAllowDuplicate(false);
+  }
+
+  // 专门改某个事项的办理状态：已保存的写回列表里那条，草稿只改当前结果。
+  function handleUpdateItem(index, nextProgress) {
+    if (selectedId) {
+      setNotices((prev) =>
+        prev.map((n) => {
+          if (n.id !== selectedId) return n;
+          const list = (n.analysis?.items || []).slice();
+          if (!list[index]) return n;
+          list[index] = { ...list[index], progress: nextProgress };
+          return {
+            ...n,
+            analysis: { ...n.analysis, items: list },
+          };
+        })
+      );
+    } else {
+      setAnalysis((prev) => {
+        if (!prev) return prev;
+        const list = (prev.items || []).slice();
+        if (!list[index]) return prev;
+        list[index] = { ...list[index], progress: nextProgress };
+        return { ...prev, items: list, _source: "manual" };
+      });
+    }
   }
 
   function handleUpdateAnalysis(patch) {
     if (selectedId) {
       setNotices((prev) =>
-        prev.map((n) => {
-          if (n.id !== selectedId) return n;
-          const next = updateNoticeAnalysis(n, patch);
-          // 手动改了字段，事项里对应的那一项要跟着改，不能一边改了一边没改。
-          return { ...next, items: applyItemPatch(n.items || [], patch) };
-        })
+        prev.map((n) =>
+          n.id === selectedId ? updateNoticeAnalysis(n, patch) : n
+        )
       );
-      setItems((prev) => applyItemPatch(prev, patch));
     } else {
       setAnalysis((prev) =>
         prev ? { ...prev, ...patch, _source: "manual" } : prev
-      );
-      setItems((prev) => applyItemPatch(prev, patch));
-    }
-  }
-
-  // 事项办理状态。点到哪算哪，存进通知里。
-  function handleProgressChange(seq, progress) {
-    const applyOne = (list) =>
-      (list || []).map((it) => (it.seq === seq ? { ...it, progress } : it));
-
-    if (selectedId) {
-      setNotices((prev) =>
-        prev.map((n) =>
-          n.id === selectedId ? { ...n, items: applyOne(n.items) } : n
-        )
-      );
-    }
-    setItems((prev) => applyOne(prev));
-  }
-
-  // 发布日期是相对日期的基准。改了它就得按新基准重算一遍事项。
-  function handlePublishedAtChange(value) {
-    setPublishedAt(value);
-    const rebuilt = buildItems(noticeText, { publishedAt: value || null });
-    setItems(rebuilt);
-    setDirty(false);
-    if (selectedId) {
-      setNotices((prev) =>
-        prev.map((n) =>
-          n.id === selectedId
-            ? { ...n, publishedAt: value || null, items: rebuilt }
-            : n
-        )
       );
     }
   }
@@ -434,9 +395,6 @@ export default function Home() {
           source: sourceLabel(item.analysis._source),
           text: item.text,
           analysis: item.analysis,
-          items: dedupeItems(item.items || []),
-          publishedAt: publishedAt || null,
-          schemaVersion: 2,
           deadlineDate: deadlineDate ? deadlineDate.getTime() : null,
           savedAt: Date.now(),
         };
@@ -462,29 +420,15 @@ export default function Home() {
     setSelectedId(null);
     setNoticeText("");
     setAnalysis(null);
-    setItems([]);
-    setDirty(false);
-    setPublishedAt("");
   }
 
   function handleTextChange(text) {
     setNoticeText(text);
+    setDirty(true);
+    // 原文改了，放行状态也该失效，重新解析时重新判断重复
+    setAllowDuplicate(false);
     // 原文动了，上一次多通知的结果就是旧的，继续显示会误导。
     if (batchResults.length > 0) setBatchResults([]);
-
-    // 原文一动，旧结果和旧定位都不作数。
-    // 标成待重新解析，界面把它压暗并禁止点依据，逼用户重新解析而不是拿旧值当真。
-    if ((analysis || items.length > 0) && !dirty) setDirty(true);
-
-    // 选中的那条通知被改了内容，就不再是那条通知了。
-    // 不解除选中的话，新通知会一直挂着上一条的已保存状态。
-    if (selectedId) {
-      const cur = notices.find((n) => n.id === selectedId);
-      if (!cur || cur.text !== text) {
-        setSelectedId(null);
-        setPublishedAt("");
-      }
-    }
   }
 
   function handleModeChange(newMode) {
@@ -548,21 +492,29 @@ export default function Home() {
           >
             <div className="w-full min-h-0 flex-1 overflow-y-auto px-6 py-3">
               <div className="mx-auto flex h-full w-full max-w-4xl flex-col">
+                {dirty && (
+                  <div
+                    className="mb-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700"
+                    title="请先重新解析"
+                  >
+                    内容已修改，待重新解析
+                  </div>
+                )}
                 <NoticeInput
                   value={noticeText}
                   onChange={handleTextChange}
                   onParse={handleParse}
                   onSave={handleSave}
                   canSave={
-                    inputMode === "multi"
+                    dirty
+                      ? false
+                      : inputMode === "multi"
                       ? batchSavable > 0 && !parsing
-                      : Boolean(analysis) && !selectedId && !parsing && !dirty
+                      : Boolean(analysis) && !selectedId && !parsing
                   }
                   saveLabel={
                     parsing
                       ? "解析中…"
-                      : dirty
-                      ? "请先重新解析"
                       : inputMode === "multi"
                       ? batchSavable > 0
                         ? "保存 " + batchSavable + " 条到我的通知"
@@ -591,14 +543,9 @@ export default function Home() {
                 selectedNotice={selectedNotice}
                 analysis={displayAnalysis}
                 draftText={noticeText}
-                items={displayItems}
-                stale={dirty}
-                publishedAt={publishedAt}
-                onPublishedAtChange={handlePublishedAtChange}
-                onProgressChange={handleProgressChange}
                 onUpdate={handleUpdateAnalysis}
+                onUpdateItem={handleUpdateItem}
                 onFieldClick={handleHighlightSpan}
-                onRetry={retryParse}
               />
             )}
           </div>
@@ -618,27 +565,13 @@ export default function Home() {
         />
       )}
 
-      {duplicate.open && (
+      {duplicate && (
         <DuplicateDialog
-          open={duplicate.open}
-          type={duplicate.type}
-          title={duplicate.notice ? duplicate.notice.title : ""}
-          onClose={() => setDuplicate({ open: false, type: "", notice: null })}
-          onView={() => {
-            const n = duplicate.notice;
-            setDuplicate({ open: false, type: "", notice: null });
-            if (n) handleSelect(n.id);
-          }}
-          onSkip={() =>
-            setDuplicate({ open: false, type: "", notice: null })
-          }
-          onImportAnyway={() => {
-            setDuplicate({ open: false, type: "", notice: null });
-            // 仍然导入就是要按当前这份原文再解析一遍存成新通知。
-            // 不能拿上一条通知的解析结果充当这一条的，那就成了静默串台。
-            setAllowDuplicate(true);
-            retryParse();
-          }}
+          duplicate={duplicate}
+          onClose={handleDuplicateCancel}
+          onView={handleDuplicateView}
+          onImport={handleDuplicateImport}
+          onCancel={handleDuplicateCancel}
         />
       )}
 

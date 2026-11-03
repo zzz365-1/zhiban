@@ -795,30 +795,31 @@ const MATERIAL_WORDS = [
   "免冠照片", "证件照",
 ];
 
-const ACTION_RE = new RegExp(
-  "(提交|报送|上交|递交|携带|准备|附上|提供|填写|打印|带|将|需|须|应|上传|" +
-    "交到|交至|交于|交给|汇总|填报|领取|补交|回交)"
-);
+// 材料词后面紧跟这些字，说明是地名的一部分，不是要交的东西。
+// 例：图南楼报告厅 的 报告、第三会议室 的 会议，都不能当材料。
+const MATERIAL_PLACE_NEXT = ["厅", "馆", "楼", "室", "中心", "处", "部", "会堂", "会"];
 
-// 这些词出现在材料前面，说明是在讲内容不是在要东西。
-// 讲座介绍简历制作与面试技巧里的简历是讲座内容，不是要交的材料。
+// 介绍讲解类语境词后面紧跟的内容，说的是“讲什么/涵盖什么”，不是“要交什么”。
 const MATERIAL_CONTEXT_BLOCK = new RegExp(
-  "(?:介绍|讲解|讲授|分享|涵盖|涉及|内容包括|主题为|主题是|主题|内容)[^，。；；]{0,8}$"
+  "(?:介绍|讲解|讲授|分享|涵盖|涉及|主题|内容|围绕|包括|包含|关于|讲解|解读)[ ]*$"
 );
 
-// 材料词后面紧跟这些字，说明它是地名的一部分。
-// 图南楼报告厅里的报告是地点，不是要交的材料。
-const MATERIAL_PLACE_NEXT = [
-  "厅", "馆", "楼", "室", "中心", "处", "部", "会堂", "会",
-];
-
-// 这些表名不是要交的材料，是时间安排一类，不能收。
+// 这些整词出现时一律不算材料：时间表/日程表/座位表等整表，以及代表/表现/表扬等非材料词。
 const MATERIAL_FORM_BLOCK = new RegExp(
-  "^(?:时间表|日程表|课程表|座位表|排班表|值班表|流程图|代表|表现|表扬|表格说明)$"
+  "(?:时间表|日程表|课程表|座位表|排班表|值班表|流程图|代表|表现|表扬)"
 );
 
-// 纸质 电子 手写这类前缀跟材料是一个整体，纸质申请表不能只给申请表。
+// 贴在前面的限定词，命中时要连带前缀一起保留（纸质申请表 不能只给 申请表）。
 const MATERIAL_PREFIX = ["纸质", "电子", "手写", "原件", "双面"];
+
+// 一句里出现这些动作词，就以动作为准，绕开上面的语境拦截。
+const MATERIAL_ACTION_RESCUE = new RegExp(
+  "(?:交|提交|报送|上交|递交|携带|附上|补交|填写|填报)"
+);
+
+const ACTION_RE = new RegExp(
+  "(提交|报送|上交|递交|携带|准备|附上|提供|填写|打印|带|将|需|须|应|上传)"
+);
 
 const QUANTIFIER_CHARS = "支张份个本件套盒把台部只条枚页瓶包块片";
 const NUMBER_CHARS = "0123456789一二三四五六七八九十两几";
@@ -971,33 +972,73 @@ function isHintWordAt(text, word, idx) {
   return false;
 }
 
-// 一个材料词在这一处该不该收。挡掉两种误提：
-// 一是后面跟地点后缀的报告厅，二是前面是介绍讲解这类的讲座内容。
-// 但原文里真有提交交到这类动作时不挡，动作比语境更可靠。
-function isBlockedMaterialAt(text, word, idx) {
-  const after = text.slice(idx + word.length, idx + word.length + 2);
-  for (const suf of MATERIAL_PLACE_NEXT) {
-    if (after.indexOf(suf) === 0) return true;
-  }
-  const before = text.slice(Math.max(0, idx - 15), idx);
-  if (MATERIAL_CONTEXT_BLOCK.test(before)) {
-    const hasRealAction = new RegExp(
-      "(提交|报送|上交|递交|交到|交至|交于|交给|携带|附上|补交|回交|填写|填报)"
-    ).test(before);
-    if (!hasRealAction) return true;
-  }
-  return false;
-}
+/**
+ * 表/单/册结尾的名词型材料候选。
+ *
+ * 【为什么】体温监测表 这类说法认不出来，根源是白名单一个个列词列不全，
+ * 而“表、单、册”本身是材料名的典型结尾。这里按“修饰成分 + 表|单|册”收词，
+ * 不再依赖白名单枚举。
+ *
+ * 【必须避开的】时间表、日程表、座位表这类整表不是要交的材料，
+ * 用 MATERIAL_FORM_BLOCK 整词拦掉。代表、表现、表扬不是材料，也一并拦掉。
+ */
+function collectFormEndingCandidates(text) {
+  const candidates = [];
+  const re = new RegExp("[一-龥A-Za-z0-9]{1,10}[表单册]", "g");
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const word = m[0];
+    if (MATERIAL_FORM_BLOCK.test(word)) continue;
+    const last = word[word.length - 1];
+    if (last !== "表" && last !== "单" && last !== "册") continue;
 
-// 材料词前面紧贴着纸质电子这类限定词时一起收进来。
-function extendMaterialPrefix(text, word, start) {
-  for (const pre of MATERIAL_PREFIX) {
-    const from = start - pre.length;
-    if (from >= 0 && text.slice(from, start) === pre) {
-      return { word: pre + word, start: from };
+    // 先从整体命中里切出“结尾词之前的那段修饰成分”，再对修饰成分做截断。
+    const body = word.slice(0, word.length - 1); // 去掉末尾 表/单/册
+    let cut = 0;
+    // 时间点、前将到至在于 都是“不是材料名本身”的分界。
+    // 停住字表。只收确定安全的动作/介词/时间分界：
+    //   带 送 交 到 至 在 于 前 将
+    // 【绝不能加的字】报 —— “报名表”里的“报”一旦入表，会从后往前把它当成
+    //   分界，报名表被截成“名表”。同理 申、登、汇 等构成材料名本身的字也不可加。
+    //   新增任何字之前，先拿“报名表/申请表/体温监测表/学生证”这组用例验一遍。
+    const STOP = "带送交到至在于前将";
+    for (let i = body.length - 1; i >= 0; i--) {
+      const ch = body[i];
+      if (STOP.indexOf(ch) !== -1) {
+        cut = i + 1;
+        break;
+      }
+      // 时间点：数字后跟 点/时/分，截在数字前
+      if (ch === "点" || ch === "时" || ch === "分") {
+        let j = i - 1;
+        while (j >= 0 && "0123456789一二三四五六七八九十两".indexOf(body[j]) !== -1) {
+          j--;
+        }
+        cut = j + 1;
+        break;
+      }
     }
+    let trimmedBody = body.slice(cut);
+
+    // 若截断把“纸质/电子/手写/原件/双面”这类限定词切掉了，补回来。
+    for (const p of MATERIAL_PREFIX) {
+      const full = p + trimmedBody;
+      if (full === body.slice(body.length - full.length) && trimmedBody.indexOf(p) !== 0) {
+        if (full.length <= body.length && body.endsWith(trimmedBody)) {
+          trimmedBody = full;
+          break;
+        }
+      }
+    }
+
+    const finalWord = trimmedBody + last;
+    if (finalWord.length < 2) continue;
+    if (MATERIAL_FORM_BLOCK.test(finalWord)) continue;
+
+    const start = m.index + (word.length - finalWord.length);
+    candidates.push({ word: finalWord, start, end: m.index + word.length });
   }
-  return { word, start };
+  return candidates;
 }
 
 function collectMaterialCandidates(text) {
@@ -1005,7 +1046,12 @@ function collectMaterialCandidates(text) {
   for (const word of MATERIAL_WORDS) {
     let idx = text.indexOf(word);
     while (idx !== -1) {
-      if (isHintWordAt(text, word, idx) || isBlockedMaterialAt(text, word, idx)) {
+      if (isHintWordAt(text, word, idx)) {
+        idx = text.indexOf(word, idx + 1);
+        continue;
+      }
+      // 整表类（时间表/日程表/座位表…）和代表/表现/表扬 一律不收
+      if (MATERIAL_FORM_BLOCK.test(word)) {
         idx = text.indexOf(word, idx + 1);
         continue;
       }
@@ -1019,54 +1065,52 @@ function collectMaterialCandidates(text) {
       const hasOtherMaterial = MATERIAL_WORDS.some(
         (w) => w !== word && context.includes(w)
       );
+
+      // 地名后缀拦截：材料词后面紧跟厅/馆/楼/室/中心/处/部/会堂 → 是地名，不是材料。
+      // 【例外口子】同一句里出现交/提交/报送等动作词时，以动作为准，仍然收进来。
+      // 请于11月9日前将简历交至就业指导中心 就是靠这条救回来的。
+      let blocked = false;
+      {
+        const afterWord = text.slice(idx + word.length, idx + word.length + 2);
+        for (const nx of MATERIAL_PLACE_NEXT) {
+          if (afterWord.startsWith(nx)) {
+            blocked = true;
+            break;
+          }
+        }
+        if (!blocked) {
+          const beforeWord = text.slice(Math.max(0, idx - 15), idx);
+          if (MATERIAL_CONTEXT_BLOCK.test(beforeWord)) blocked = true;
+        }
+      }
+      if (blocked) {
+        // 动作救回：整句（到标点为止）里有动作词才算数
+        const clauseStart = (() => {
+          for (let i = idx - 1; i >= 0; i--) {
+            if (CLAUSE_SPLIT.test(text[i])) return i + 1;
+          }
+          return 0;
+        })();
+        const clauseEnd = (() => {
+          for (let i = idx + word.length; i < text.length; i++) {
+            if (CLAUSE_SPLIT.test(text[i])) return i;
+          }
+          return text.length;
+        })();
+        const clause = text.slice(clauseStart, clauseEnd);
+        if (!MATERIAL_ACTION_RESCUE.test(clause)) {
+          idx = text.indexOf(word, idx + 1);
+          continue;
+        }
+      }
+
       if (hasAction || hasOtherMaterial) {
-        const ext = extendMaterialPrefix(text, word, idx);
-        candidates.push({
-          word: ext.word,
-          start: ext.start,
-          end: idx + word.length,
-        });
+        candidates.push({ word, start: idx, end: idx + word.length });
       }
       idx = text.indexOf(word, idx + 1);
     }
   }
-  return candidates.concat(collectFormCandidates(text));
-}
-
-// 体温监测表 签到表 确认表这类词表里没有的表单名。
-// 词表不可能收全所有表名，这里认两到八个字加表单册的写法，
-// 表名在原文里出现的时候要求附近有交带提交这类动作，宁缺勿滥。
-function collectFormCandidates(text) {
-  const found = [];
-  const re = new RegExp("([一-龥]{2,8}?)(表|单|册)(?![格])", "g");
-  let m;
-  while ((m = re.exec(text)) !== null) {
-    const word = m[0];
-    const idx = m.index;
-    // 前缀里混进点前将把的厅这类字，说明抓到的是时间和动作，不是表单名。
-    // 丢掉之后从下一个字重新试，别把里面的真表单名一起跳过去。
-    if (
-      new RegExp(
-        "[点前将把的厅了和及或与从向往由给用使是在至到日月年时分]"
-      ).test(m[1])
-    ) {
-      re.lastIndex = idx + 1;
-      continue;
-    }
-    if (MATERIAL_WORDS.includes(word)) continue;
-    if (MATERIAL_FORM_BLOCK.test(word)) continue;
-    if (isBlockedMaterialAt(text, word, idx)) continue;
-    const before = text.slice(Math.max(0, idx - 15), idx);
-    const after = text.slice(
-      idx + word.length,
-      Math.min(text.length, idx + word.length + 8)
-    );
-    const hasAction = ACTION_RE.test(before) || ACTION_RE.test(after);
-    if (!hasAction) continue;
-    const ext = extendMaterialPrefix(text, word, idx);
-    found.push({ word: ext.word, start: ext.start, end: idx + word.length });
-  }
-  return found;
+  return candidates;
 }
 
 /**
@@ -1180,11 +1224,26 @@ function extractCarryItems(text) {
  * 三条路径都会把命中位置记下来，最后走 mergeAdjacentCandidates + dedupeCandidates。
  * 不这样做，“身份证复印件”会因为白名单分别命中“身份证”和“复印件”而被拆开。
  */
+/**
+ * 材料词前面若贴着 纸质/电子/手写/原件/双面，把前缀一起带上。
+ * 纸质申请表 不能只给 申请表。
+ */
+function attachMaterialPrefix(word, text) {
+  for (const p of MATERIAL_PREFIX) {
+    const full = p + word;
+    if (text.indexOf(full) !== -1) return full;
+  }
+  return word;
+}
+
 function extractMaterials(text) {
   const noParens = stripParentheses(text);
   let candidates = [];
 
   candidates = candidates.concat(collectMaterialCandidates(noParens));
+
+  // 表/单/册结尾名词型材料（体温监测表 靠这条认出来）
+  candidates = candidates.concat(collectFormEndingCandidates(noParens));
 
   const carryItems = extractCarryItems(text);
   for (const item of carryItems) {
@@ -1224,7 +1283,8 @@ function extractMaterials(text) {
   }
 
   const merged = mergeAdjacentCandidates(candidates);
-  return dedupeCandidates(merged);
+  const deduped = dedupeCandidates(merged);
+  return deduped.map((w) => attachMaterialPrefix(w, noParens));
 }
 
 // ---------- 面向对象 ----------
@@ -1374,24 +1434,22 @@ const CATEGORY_KEYWORDS = [
   ],
 ];
 
-// 分类是推断出来的，不是从原文抄来的值。
-// 所以有些词在特定位置不能当证据：行政楼里的行政说的是楼，不是说这是行政类通知。
+// 分类词的“后缀排除表”：命中分类词后往后看紧跟的两三个字，
+// 若是地名/场所组成部分，则这次命中不算证据。
+// 例：行政楼A302 的 行政、大学生活动中心 的 活动、第三会议室 的 会议。
 const CATEGORY_BLOCK_NEXT = {
-  行政: ["楼", "馆", "处", "大厅", "中心", "楼前", "办公室", "会议室"],
+  行政: ["楼", "馆", "处", "大厅", "中心", "办公室", "会议室"],
   活动: ["中心", "室", "厅"],
   会议: ["室", "厅", "楼", "中心", "场"],
 };
 
-function isCategoryWordAt(text, word, idx) {
-  const block = CATEGORY_BLOCK_NEXT[word];
-  if (!block) return true;
-  const after = text.slice(idx + word.length, idx + word.length + 3);
-  for (const b of block) {
-    if (after.indexOf(b) === 0) return false;
-  }
-  return true;
-}
-
+/**
+ * 本地粗分类。命中分类词后往后看紧跟的两三个字，被挡就从这个词的下一次出现处接着找，
+ * 都找不到才算这个词未命中，继续判下一个词。
+ *
+ * 【为什么要带位置】行政楼、活动中心、会议室里的行政/活动/会议是地名的一部分，
+ * 不是通知性质。只看 indexOf 会被这些地名带偏，判出假的分类。
+ */
 function extractCategory(text) {
   if (!text) return null;
   for (const pair of CATEGORY_KEYWORDS) {
@@ -1400,7 +1458,18 @@ function extractCategory(text) {
     for (const w of words) {
       let idx = text.indexOf(w);
       while (idx !== -1) {
-        if (isCategoryWordAt(text, w, idx)) return label;
+        const after = text.slice(idx + w.length, idx + w.length + 3);
+        const blocks = CATEGORY_BLOCK_NEXT[w];
+        let isBlocked = false;
+        if (blocks) {
+          for (const nx of blocks) {
+            if (after.startsWith(nx)) {
+              isBlocked = true;
+              break;
+            }
+          }
+        }
+        if (!isBlocked) return label;
         idx = text.indexOf(w, idx + 1);
       }
     }
