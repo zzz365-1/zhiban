@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { statusLabel } from "../lib/noticeItems.js";
 
 const PROGRESS_OPTIONS = [
@@ -323,11 +323,12 @@ function locationHeadline(item, fields, status, onLocate) {
   return { text: entry, empty: true, evidence: null, status: status.location };
 }
 
-function MaterialChecklist({ materials, onChange }) {
+function MaterialChecklist({ materials, onChange, justReadyKey, index }) {
   return (
     <ul className="mt-1 space-y-1">
       {materials.map((m, i) => {
         const checked = Boolean(m && m.ready);
+        const key = String(index) + "-" + String(i);
         return (
           <li key={i}>
             <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-700">
@@ -340,6 +341,11 @@ function MaterialChecklist({ materials, onChange }) {
               <span className={checked ? "text-slate-400 line-through" : ""}>
                 {m && m.name ? m.name : "未命名材料"}
               </span>
+              {justReadyKey === key && (
+                <span className="zb-fade-in text-[11px] text-green-600">
+                  已准备
+                </span>
+              )}
             </label>
           </li>
         );
@@ -357,6 +363,25 @@ export default function ItemsPanel({
   onCompleteToggle,
   onEditField,
 }) {
+  // 最近一次刚被勾上的材料标识，事项序号加材料序号，用于短暂显示已准备
+  const [justReadyKey, setJustReadyKey] = useState(null);
+  const readyTimerRef = useRef(null);
+
+  useEffect(() => {
+    return () => {
+      if (readyTimerRef.current) clearTimeout(readyTimerRef.current);
+    };
+  }, []);
+
+  function flashReady(key) {
+    if (readyTimerRef.current) clearTimeout(readyTimerRef.current);
+    setJustReadyKey(key);
+    readyTimerRef.current = setTimeout(() => {
+      setJustReadyKey(null);
+      readyTimerRef.current = null;
+    }, 1200);
+  }
+
   if (!items || items.length === 0) {
     return (
       <p className="rounded-lg border border-dashed border-slate-200 px-3 py-4 text-sm text-slate-400">
@@ -386,7 +411,11 @@ export default function ItemsPanel({
             const loc = locationHeadline(item, fields, status, onLocate);
 
             return (
-              <li key={index} className="relative pl-5">
+              <li
+                key={index}
+                className="zb-enter relative pl-5"
+                style={{ animationDelay: Math.min(index, 4) * 80 + "ms" }}
+              >
                 {/* 节点圆点 */}
                 <span className="absolute left-0 top-2 h-2.5 w-2.5 rounded-full border-2 border-white bg-blue-500 shadow ring-1 ring-blue-200" />
 
@@ -440,7 +469,12 @@ export default function ItemsPanel({
                         materials={materials}
                         onChange={(mi, ready) => {
                           if (onMaterialToggle) onMaterialToggle(index, mi, ready);
+                          const key = String(index) + "-" + String(mi);
+                          if (ready) flashReady(key);
+                          else if (justReadyKey === key) setJustReadyKey(null);
                         }}
+                        justReadyKey={justReadyKey}
+                        index={index}
                       />
                     ) : (
                       <p className="mt-1 text-xs text-slate-400">

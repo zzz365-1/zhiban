@@ -1,12 +1,17 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import TopBar from "./components/TopBar";
+import { useRouter } from "next/navigation";
+import SideNav from "./components/SideNav";
+import AppHeader from "./components/AppHeader";
+import WorkspaceOverview, { itemKey } from "./components/WorkspaceOverview";
+import NewNoticeDialog from "./components/NewNoticeDialog";
+import NoticeDetail from "./components/NoticeDetail";
 import NoticeList from "./components/NoticeList";
-import NoticeInput from "./components/NoticeInput";
 import AnalysisPanel from "./components/AnalysisPanel";
 import TodoList from "./components/TodoList";
-import CalendarView from "./components/CalendarView";
+import CalendarPage from "./components/CalendarPage";
+import ChangeCenter from "./components/ChangeCenter";
 import ShareDialog from "./components/ShareDialog";
 import MultiSplitDialog from "./components/MultiSplitDialog";
 import MultiResultPanel from "./components/MultiResultPanel";
@@ -64,9 +69,14 @@ function filterNotices(notices, query, category) {
     );
   }
   if (category && category !== "全部") {
-    result = result.filter(
-      (n) => n.analysis && n.analysis.category === category
-    );
+    // 示例不是一个分类字段，它标在通知最外层的来源上，要单独比
+    if (category === "示例") {
+      result = result.filter((n) => n.source === "示例");
+    } else {
+      result = result.filter(
+        (n) => n.analysis && n.analysis.category === category
+      );
+    }
   }
   return result;
 }
@@ -78,7 +88,36 @@ function sourceLabel(source) {
   return "手动导入";
 }
 
+// 从通知里挑出所有待确认的事项，摊成工作台待确认区要用的事件形状。
+// 字段状态和摊平事件那个模块保持一致：优先分析结果里的 items，没有再退回最外层。
+function buildPendingItems(notices) {
+  const out = [];
+  for (const n of Array.isArray(notices) ? notices : []) {
+    const items =
+      (n.analysis && n.analysis.items) || n.items || [];
+    items.forEach((item, idx) => {
+      const status = item && item.status;
+      if (!status) return;
+      const hasPending = Object.values(status).some((v) => v === "pending");
+      if (!hasPending) return;
+      out.push({
+        noticeId: n.id,
+        noticeTitle: n.title,
+        itemIndex: idx,
+        name: item.name,
+        ts: null,
+        location: item.location || "",
+        materials: Array.isArray(item.materials) ? item.materials : [],
+        progress: "待确认",
+        timeType: item.timeType || "deadline",
+      });
+    });
+  }
+  return out;
+}
+
 export default function Home() {
+  const router = useRouter();
   const [notices, setNotices] = useState([]);
   const [hydrated, setHydrated] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
@@ -109,6 +148,13 @@ export default function Home() {
   // 否则保存时又被查一次重复，陷入循环
   const [allowDuplicate, setAllowDuplicate] = useState(false);
 
+  // 第四轮工作台外壳：当前视图、新增通知弹窗、统计点亮、选中事项、启动门槛
+  const [view, setView] = useState("workbench");
+  const [showNew, setShowNew] = useState(false);
+  const [focus, setFocus] = useState(null);
+  const [selectedItemKey, setSelectedItemKey] = useState(null);
+  const [booting, setBooting] = useState(true);
+
   // 补充通知流程：抽取结果、当前步骤、选中的原通知与事项、对比结果、提醒
   const [patchDraft, setPatchDraft] = useState(null);
   const [patchStep, setPatchStep] = useState("closed");
@@ -116,6 +162,8 @@ export default function Home() {
   const [patchIndexes, setPatchIndexes] = useState([]);
   const [patchReview, setPatchReview] = useState(null);
   const [patchAlerts, setPatchAlerts] = useState([]);
+  // 刚刚确认更新后的成功提示数据，给变更记录页用
+  const [patchSuccess, setPatchSuccess] = useState(null);
 
   useEffect(() => {
     try {
@@ -128,6 +176,30 @@ export default function Home() {
       console.warn("读取本地通知失败：", e);
     }
     setHydrated(true);
+
+    // 欢迎页看过没有：看过就直接结束启动，没看过交给下面那个副作用跳转
+    try {
+      const welcomed = localStorage.getItem("zhiban.welcomed");
+      if (welcomed === "1") setBooting(false);
+    } catch (e) {
+      console.warn("读取欢迎页标记失败：", e);
+    }
+  }, []);
+
+  // 没看过欢迎页的先送去欢迎页，别让他们直接闪到工作台
+  useEffect(() => {
+    let welcomed = null;
+    try {
+      welcomed = localStorage.getItem("zhiban.welcomed");
+    } catch (e) {
+      console.warn("读取欢迎页标记失败：", e);
+    }
+    if (welcomed !== "1") {
+      router.replace("/welcome");
+    } else {
+      setBooting(false);
+    }
+    // 只在挂载时跑一次
   }, []);
 
   useEffect(() => {
@@ -163,6 +235,14 @@ export default function Home() {
   // 日历和待办都从事项摊平出来的同一份事件走，改了事项两边一起变
   const routeEvents = buildRouteEvents(filtered);
   const todoItems = getTodoItems(routeEvents, now);
+  // 工作台三组数据：待确认单独算，即将截止就是待办那一份，待办理取全部未办的按时间排序
+  const pendingItems = buildPendingItems(filtered);
+  const soonItems = todoItems;
+  const todoSlim = routeEvents
+    .filter((e) => e.progress !== "已办理" && e.progress !== "无需办理")
+    .slice()
+    .sort((a, b) => (a.ts || 0) - (b.ts || 0))
+    .slice(0, 12);
 
   const selectedNotice = notices.find((n) => n.id === selectedId) ?? null;
   const displayAnalysis = selectedId
@@ -191,6 +271,8 @@ export default function Home() {
     setSelectedId(id);
     setNoticeText(target.text);
     setAnalysis(target.analysis);
+    // 从工作台跳过来的时候清掉那边的选中态，免得两边对不上
+    setSelectedItemKey(null);
     // 点已存通知时把上次批量的残留和模式提示都清掉
     setBatchResults([]);
     setSplitDialog({ open: false, items: [], reason: "" });
@@ -221,6 +303,8 @@ export default function Home() {
     if (inputMode !== "multi") {
       const patch = buildNoticePatch(text);
       if (patch && patch.isPatch && notices.length > 0) {
+        // 补充通知走的是弹窗流程，粘贴弹窗要先收掉，别压在对比弹窗底下
+        setShowNew(false);
         setPatchDraft(patch);
         setPatchStep("link");
         setPatchNoticeId(null);
@@ -235,6 +319,7 @@ export default function Home() {
     if (inputMode !== "multi" && !allowDuplicate) {
       const dup = checkDuplicate(text, notices);
       if (dup && dup.type !== "none") {
+        setShowNew(false);
         setDuplicate(dup);
         return;
       }
@@ -243,6 +328,7 @@ export default function Home() {
     // 多通知先弹窗确认分法，不直接开跑。
     // 切不出来也要弹，闷声不响用户以为程序坏了。
     if (inputMode === "multi") {
+      setShowNew(false);
       const sp = splitNotices(text);
       if (!sp.ok || !sp.items || sp.items.length < 2) {
         setSplitDialog({
@@ -267,6 +353,9 @@ export default function Home() {
     setAnalysis(withItems);
     setDirty(false);
     setParsing(false);
+    // 解析完关掉新增通知弹窗，直接把结果摆到眼前
+    setShowNew(false);
+    setView("notices");
   }
 
   function handleDuplicateView(notice) {
@@ -314,6 +403,8 @@ export default function Home() {
     }
     setBatchResults(results);
     setParsing(false);
+    setShowNew(false);
+    setView("notices");
   }
 
   async function handleParseAsSingle() {
@@ -555,8 +646,13 @@ export default function Home() {
   }
 
   function handleLoadSamples() {
+    // 示例只往前插，不许清空同学自己存的通知
     const samples = buildSampleNotices(Date.now());
-    setNotices(samples);
+    setNotices((prev) => {
+      const existingIds = new Set(prev.map((n) => n.id));
+      const toAdd = samples.filter((s) => !existingIds.has(s.id));
+      return [...toAdd, ...prev];
+    });
     setSelectedId(null);
     setNoticeText("");
     setAnalysis(null);
@@ -626,6 +722,19 @@ export default function Home() {
         };
       })
     );
+
+    // 确认成功之后把受影响的事项名称留下来，切到变更页让同学立刻看到结果
+    const affectedNames = (Array.isArray(patchIndexes) ? patchIndexes : [])
+      .map((i) => (items[i] ? items[i].name : null))
+      .filter(Boolean);
+    setPatchSuccess({
+      noticeId: notice.id,
+      title: notice.title,
+      itemNames: affectedNames,
+      changes: Array.isArray(record.changes) ? record.changes : [],
+    });
+    setView("changes");
+
     setPatchStep("closed");
     setPatchDraft(null);
     setPatchReview(null);
@@ -649,110 +758,271 @@ export default function Home() {
     setWarningDismissed(true);
   }
 
-  const leftWidth = activeTab === "calendar" ? "360px" : "260px";
-  const showEmptyState = hydrated && notices.length === 0;
+  // 工作台上的事项可能不属于当前选中的通知，所以要按事件自带的编号定位，
+  // 找到之后最外层的 items 和分析结果里的 items 两处都要写，只写一处日历不跟着变。
+  function handleToggleEventComplete(event, nextProgress) {
+    if (!event) return;
+    const targetId = event.noticeId;
+    const index = event.itemIndex;
+    setNotices((prev) =>
+      prev.map((n) => {
+        if (n.id !== targetId) return n;
+        const list = ((n.analysis && n.analysis.items) || n.items || []).slice();
+        if (!list[index]) return n;
+        list[index] = { ...list[index], progress: nextProgress };
+        return { ...n, items: list, analysis: { ...n.analysis, items: list } };
+      })
+    );
+  }
+
+  function handleToggleEventMaterial(event, materialIndex, ready) {
+    if (!event) return;
+    const targetId = event.noticeId;
+    const index = event.itemIndex;
+    setNotices((prev) =>
+      prev.map((n) => {
+        if (n.id !== targetId) return n;
+        const list = ((n.analysis && n.analysis.items) || n.items || []).slice();
+        if (!list[index]) return n;
+        const mats = Array.isArray(list[index].materials)
+          ? list[index].materials.slice()
+          : [];
+        if (!mats[materialIndex]) return n;
+        mats[materialIndex] = { ...mats[materialIndex], ready: Boolean(ready) };
+        list[index] = { ...list[index], materials: mats };
+        return { ...n, items: list, analysis: { ...n.analysis, items: list } };
+      })
+    );
+  }
+
+  const counts = {
+    notices: filtered.length,
+    pending: pendingItems.length,
+    soon: soonItems.length,
+    todo: todoSlim.length,
+    changes: notices.filter(
+      (n) => Array.isArray(n.history) && n.history.length > 0
+    ).length,
+  };
+
+  const headerTitle =
+    view === "workbench"
+      ? "工作台"
+      : view === "notices"
+      ? "我的通知"
+      : view === "calendar"
+      ? "日历"
+      : "变更记录";
+
+  function handleFocusStat(key) {
+    setFocus(key);
+    setView("workbench");
+  }
+
+  function handleOpenItem(event) {
+    if (!event) return;
+    setSelectedItemKey(itemKey(event));
+    handleSelect(event.noticeId);
+    setView("notices");
+  }
+
+  function handleOpenNew() {
+    setShowNew(true);
+  }
+
+  function handleCloseNew() {
+    setShowNew(false);
+  }
+
+  if (booting) {
+    return (
+      <div className="flex h-screen w-screen flex-col items-center justify-center bg-[#0F172A]">
+        <div className="text-[20px] font-bold text-white">知办</div>
+        <div className="mt-2 text-[12px] text-white/55">正在载入本地数据</div>
+      </div>
+    );
+  }
 
   return (
-    <div className="flex h-screen flex-col bg-slate-100">
-      <TopBar
-        activeTab={activeTab}
-        onTabChange={setActiveTab}
-        searchQuery={searchQuery}
-        onSearchChange={setSearchQuery}
-        category={categoryFilter}
-        onCategoryChange={setCategoryFilter}
-        parsing={parsing}
-        onOpenShare={() => setShowShare(true)}
+    <div className="flex h-screen overflow-hidden bg-slate-100">
+      <SideNav
+        view={view}
+        onViewChange={setView}
+        counts={counts}
+        onCreate={handleOpenNew}
+        onBackWelcome={() => router.push("/welcome")}
+        onFocusStat={handleFocusStat}
       />
 
-      <div
-        className="grid min-h-0 flex-1"
-        style={{ gridTemplateColumns: leftWidth + " 1fr" }}
-      >
-          <div className="min-h-0 overflow-hidden">
-            {activeTab === "todo" && <TodoList items={todoItems} now={now} />}
-            {activeTab === "calendar" && (
-              <CalendarView notices={filtered} now={now} />
-            )}
-            {activeTab === "all" && (
-              <NoticeList
-                notices={filtered}
-                selectedId={selectedId}
-                onSelect={handleSelect}
-                onDelete={handleDelete}
-                hydrated={hydrated}
-              />
-            )}
-          </div>
+      <div className="flex min-w-0 flex-1 flex-col">
+        <AppHeader
+          title={headerTitle}
+          subtitle={"一共 " + notices.length + " 条通知"}
+          searchQuery={searchQuery}
+          onSearchChange={setSearchQuery}
+          category={categoryFilter === "全部" ? "all" : categoryFilter}
+          onCategoryChange={(v) =>
+            setCategoryFilter(v === "all" ? "全部" : v)
+          }
+          onOpenShare={() => setShowShare(true)}
+          right={
+            <button
+              type="button"
+              onClick={handleLoadSamples}
+              className="inline-flex h-9 items-center rounded-[10px] border border-[#E2E8F0] bg-white px-3 text-[13px] text-[#0F172A] transition-colors duration-200 ease-out hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 motion-reduce:transition-none"
+            >
+              载入示例通知
+            </button>
+          }
+        />
 
-        <div className="flex min-h-0 flex-col">
-          <div
-            className="flex min-h-0 flex-col border-b border-slate-200 bg-slate-50/70"
-            style={{ height: "45%", minHeight: "300px" }}
-          >
-            <div className="w-full min-h-0 flex-1 overflow-y-auto px-6 py-3">
-              <div className="mx-auto flex h-full w-full max-w-4xl flex-col">
-                {dirty && (
-                  <div
-                    className="mb-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700"
-                    title="请先重新解析"
-                  >
-                    内容已修改，待重新解析
-                  </div>
-                )}
-                <NoticeInput
-                  value={noticeText}
-                  onChange={handleTextChange}
-                  onParse={handleParse}
-                  onSave={handleSave}
-                  canSave={
-                    dirty
-                      ? false
-                      : inputMode === "multi"
-                      ? batchSavable > 0 && !parsing
-                      : Boolean(analysis) && !selectedId && !parsing
-                  }
-                  saveLabel={
-                    parsing
-                      ? "解析中…"
-                      : inputMode === "multi"
-                      ? batchSavable > 0
-                        ? "保存 " + batchSavable + " 条到我的通知"
-                        : "保存到我的通知"
-                      : selectedId
-                      ? "已保存"
-                      : "保存到我的通知"
-                  }
-                  mode={inputMode}
-                  onModeChange={handleModeChange}
-                  warning={warning}
-                  onDismissWarning={handleDismissWarning}
-                  onSwitchMode={handleSwitchMode}
-                  showEmptyState={showEmptyState}
-                  onLoadSamples={handleLoadSamples}
+        <main className="min-h-0 flex-1 overflow-hidden">
+          {view === "workbench" && (
+            <div className="h-full overflow-y-auto">
+              <WorkspaceOverview
+                now={now}
+                groups={{
+                  pending: pendingItems,
+                  soon: soonItems,
+                  todo: todoSlim,
+                }}
+                stats={counts}
+                focus={focus}
+                selectedKey={selectedItemKey}
+                onOpenItem={handleOpenItem}
+                onComplete={handleToggleEventComplete}
+                onToggleMaterial={handleToggleEventMaterial}
+                onFocusStat={handleFocusStat}
+                onCreate={handleOpenNew}
+              />
+            </div>
+          )}
+
+          {view === "notices" && (
+            <div className="flex h-full min-h-0">
+              <div className="flex w-[320px] flex-none flex-col overflow-hidden border-r border-slate-200 bg-white">
+                <NoticeList
+                  notices={filtered}
+                  selectedId={selectedId}
+                  onSelect={handleSelect}
+                  onDelete={handleDelete}
+                  hydrated={hydrated}
                 />
               </div>
+              <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
+                {inputMode === "multi" && batchResults.length > 0 ? (
+                  <div className="h-full overflow-y-auto">
+                    <MultiResultPanel items={batchResults} />
+                  </div>
+                ) : (
+                  <NoticeDetail
+                    status={
+                      parsing
+                        ? "解析中"
+                        : displayAnalysis && displayAnalysis._aiErrorCode
+                        ? "解析失败"
+                        : selectedId
+                        ? "已保存"
+                        : displayAnalysis &&
+                          Array.isArray(displayAnalysis.items) &&
+                          displayAnalysis.items.some(
+                            (it) =>
+                              it &&
+                              it.status &&
+                              Object.values(it.status).some(
+                                (v) => v === "pending"
+                              )
+                          )
+                        ? "待确认"
+                        : displayAnalysis
+                        ? "草稿"
+                        : "待解析"
+                    }
+                    text={noticeText}
+                    onTextChange={handleTextChange}
+                    readOnly={Boolean(selectedId)}
+                    noticeTitle={
+                      (selectedNotice && selectedNotice.title) ||
+                      (displayAnalysis && displayAnalysis.title) ||
+                      ""
+                    }
+                    sourceLabel={
+                      (selectedNotice && selectedNotice.source) || ""
+                    }
+                    analysis={displayAnalysis}
+                    dirty={dirty}
+                    parsing={parsing}
+                    onReparse={handleParse}
+                    onSave={handleSave}
+                    canSave={
+                      dirty
+                        ? false
+                        : inputMode === "multi"
+                        ? batchSavable > 0 && !parsing
+                        : Boolean(analysis) && !selectedId && !parsing
+                    }
+                    saveLabel={
+                      parsing
+                        ? "解析中…"
+                        : inputMode === "multi"
+                        ? batchSavable > 0
+                          ? "保存 " + batchSavable + " 条到我的通知"
+                          : "保存到我的通知"
+                        : selectedId
+                        ? "已保存"
+                        : "保存到我的通知"
+                    }
+                    onDelete={
+                      selectedId ? () => handleDelete(selectedId) : undefined
+                    }
+                  >
+                    <AnalysisPanel
+                      selectedNotice={selectedNotice}
+                      analysis={displayAnalysis}
+                      draftText={noticeText}
+                      onUpdate={handleUpdateAnalysis}
+                      onUpdateItem={handleUpdateItem}
+                      onFieldClick={handleHighlightSpan}
+                      onToggleMaterial={handleToggleMaterial}
+                      onToggleComplete={handleToggleComplete}
+                      onEditItemField={handleEditItemField}
+                    />
+                  </NoticeDetail>
+                )}
+              </div>
             </div>
-          </div>
+          )}
 
-          <div className="min-h-0 flex-1 overflow-hidden">
-            {inputMode === "multi" && batchResults.length > 0 ? (
-              <MultiResultPanel items={batchResults} />
-            ) : (
-              <AnalysisPanel
-                selectedNotice={selectedNotice}
-                analysis={displayAnalysis}
-                draftText={noticeText}
-                onUpdate={handleUpdateAnalysis}
-                onUpdateItem={handleUpdateItem}
-                onFieldClick={handleHighlightSpan}
-                onToggleMaterial={handleToggleMaterial}
-                onToggleComplete={handleToggleComplete}
-                onEditItemField={handleEditItemField}
+          {view === "calendar" && (
+            <div className="h-full w-full overflow-y-auto">
+              <CalendarPage
+                notices={filtered}
+                now={now}
+                onOpenItem={handleOpenItem}
               />
-            )}
-          </div>
-        </div>
+            </div>
+          )}
+
+          {view === "changes" && (
+            <div className="h-full w-full overflow-y-auto">
+              <ChangeCenter
+                notices={notices}
+                success={patchSuccess}
+                onDismissSuccess={() => setPatchSuccess(null)}
+                onOpenNotice={(id) => {
+                  handleSelect(id);
+                  setView("notices");
+                }}
+                onCreatePatch={handleOpenNew}
+                highlightNoticeId={
+                  patchSuccess && patchSuccess.noticeId
+                    ? patchSuccess.noticeId
+                    : null
+                }
+              />
+            </div>
+          )}
+        </main>
       </div>
 
       {splitDialog.open && (
@@ -805,6 +1075,17 @@ export default function Home() {
           onClose={() => setShowShare(false)}
         />
       )}
+
+      <NewNoticeDialog
+        open={showNew}
+        value={noticeText}
+        onChange={handleTextChange}
+        mode={inputMode}
+        onModeChange={handleModeChange}
+        parsing={parsing}
+        onParse={handleParse}
+        onClose={handleCloseNew}
+      />
     </div>
   );
 }

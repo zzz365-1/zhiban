@@ -34,6 +34,32 @@ function firstIndexOfAny(text, words) {
 // 补充后面跟这些词时，属于“补充通知”这类固定说法，不算变更词
 const SUPPLEMENT_FOLLOW_WORDS = ["通知", "说明", "公告", "事项", "安排"];
 
+// 收件说明里的不再只是说明逾期不收，不算变更词。
+// 这是一组很窄的固定说法，不扩成通用动作词黑名单，免得误伤单位名。
+const RECEIPT_NOT_WORDS = [
+  "逾期不再",
+  "过期不再",
+  "不再受理",
+  "不再接收",
+  "不再接受",
+];
+
+// 只看不再前两字或后两字是否构成收件说明固定说法
+function isReceiptNotPhrase(text, idx) {
+  const s = String(text == null ? "" : text);
+  const before2 = s.slice(Math.max(0, idx - 2), idx);
+  const after2 = s.slice(idx + "不再".length, idx + "不再".length + 2);
+  for (let i = 0; i < RECEIPT_NOT_WORDS.length; i++) {
+    const w = RECEIPT_NOT_WORDS[i];
+    if (w.indexOf("不再") === 0) {
+      if (after2 === w.slice("不再".length)) return true;
+    } else {
+      if (before2 === w.slice(0, w.length - "不再".length)) return true;
+    }
+  }
+  return false;
+}
+
 // 判断补充在 text 的补充位置是否属于固定说法
 function isSupplementFixedPhrase(text, idx) {
   const after = String(text).slice(idx + "补充".length);
@@ -43,23 +69,33 @@ function isSupplementFixedPhrase(text, idx) {
   return false;
 }
 
-// 含“补充通知”这类固定说法的“补充”不算变更词
+// 补充通知这类固定说法里的补充不算变更词，收件说明里的不再也不算，
+// 其余词出现即命中
 function hasEffectivePatchWord(text) {
   const s = String(text == null ? "" : text);
   for (let i = 0; i < PATCH_WORDS.length; i++) {
     const w = PATCH_WORDS[i];
-    if (w !== "补充") {
-      if (s.indexOf(w) !== -1) return true;
+    if (w === "补充") {
+      let from = 0;
+      while (true) {
+        const idx = s.indexOf("补充", from);
+        if (idx === -1) break;
+        if (!isSupplementFixedPhrase(s, idx)) return true;
+        from = idx + "补充".length;
+      }
       continue;
     }
-    // 补充：逐个出现位置检查
-    let from = 0;
-    while (true) {
-      const idx = s.indexOf("补充", from);
-      if (idx === -1) break;
-      if (!isSupplementFixedPhrase(s, idx)) return true;
-      from = idx + "补充".length;
+    if (w === "不再") {
+      let from = 0;
+      while (true) {
+        const idx = s.indexOf("不再", from);
+        if (idx === -1) break;
+        if (!isReceiptNotPhrase(s, idx)) return true;
+        from = idx + "不再".length;
+      }
+      continue;
     }
+    if (s.indexOf(w) !== -1) return true;
   }
   return false;
 }

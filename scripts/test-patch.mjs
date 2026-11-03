@@ -22,6 +22,17 @@ const SUPP =
   "关于助学金评审会的补充通知\n" +
   "原定11月8日的助学金评审会调整至11月9日19:00，地点改为行政楼B201会议室，其余安排不变。";
 
+// 第四轮回归：普通助学金通知，含逾期不再受理这种收件说明，不是补充通知
+const PLAIN =
+  "关于2026年国家助学金评审工作安排的通知\n" +
+  "各班请于11月5日下午5点前将纸质申请表报送至学生工作处A302办公室，逾期不再受理。\n" +
+  "评审会定于11月8日晚7点在行政楼A302会议室召开，请各班班长届时到场。";
+
+// 第四轮回归：真正的补充通知，要求日期和地点都抽到
+const SUPP2 =
+  "补充通知，原定11月8日的助学金评审会调整至11月9日19:00，" +
+  "地点改为行政楼B201会议室，其余安排不变。";
+
 const NOW = 1762000000000;
 
 function items(progress0, progress1) {
@@ -211,6 +222,22 @@ t("有歧义时不许落盘", () => {
   const p = buildNoticePatch("评审会时间另行通知。");
   return p.changes.length;
 }, 0);
+
+// ---- 8 第四轮回归 ----
+t("普通通知不被当成补充通知且变更数组为空", () => {
+  const p = buildNoticePatch(PLAIN);
+  return p.isPatch + "|" + p.changes.length;
+}, "false|0");
+
+t("真补充通知仍是补充通知且同时抽出日期和地点", () => {
+  const p = buildNoticePatch(SUPP2);
+  const fields = p.changes.map((c) => c.field);
+  return (
+    p.isPatch + "|" +
+    (fields.indexOf("date") !== -1) + "|" +
+    (fields.indexOf("location") !== -1)
+  );
+}, "true|true|true");
 
 // ---- 跑 ----
 let pass = 0;
