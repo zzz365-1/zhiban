@@ -239,6 +239,28 @@ t("真补充通知仍是补充通知且同时抽出日期和地点", () => {
   );
 }, "true|true|true");
 
+// ---- 9 第六轮回归：待定类说法不许把普通新通知劫持进补充通知 ----
+t("带抬头且时间另行通知地点待定的新通知不算补充通知", () => {
+  const text =
+    "关于留学讲座的通知\n" +
+    "时间另行通知，地点待定，请留意后续安排。";
+  const p = buildNoticePatch(text);
+  return p.isPatch + "|" + p.changes.length;
+}, "false|0");
+
+t("单独一句评审会时间另行通知仍记歧义", () => {
+  const p = buildNoticePatch("评审会时间另行通知。");
+  return p.isPatch + "|" + (p.ambiguities.length > 0);
+}, "true|true");
+
+t("有原定回指的另行通知仍是补充通知", () => {
+  const text =
+    "关于助学金评审会的补充通知\n" +
+    "原定十一月八日的助学金评审会时间另行通知，其余安排不变。";
+  const p = buildNoticePatch(text);
+  return p.isPatch + "|" + (p.ambiguities.length > 0);
+}, "true|true");
+
 // ---- 跑 ----
 let pass = 0;
 let fail = 0;

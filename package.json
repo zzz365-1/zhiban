@@ -33,6 +33,7 @@
     "validate:ics": "node scripts/validate-ics.mjs --sample",
     "export:ics": "node scripts/export-ics.mjs",
     "coverage": "node scripts/coverage-report.mjs",
+    "eval": "node scripts/eval-run.mjs",
     "demo:check": "node scripts/demo-check.mjs",
     "ui:shot": "node scripts/ui-shot.mjs"
   },

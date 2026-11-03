@@ -34,3 +34,6 @@ docs/journal/self-reflection-local.md
 .ai-out*.md
 .ai-reply*.md
 .ai-thread*.json
+
+# 本机浏览器验收与临时脚本（不进仓库）
+tmp/

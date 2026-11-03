@@ -370,6 +370,29 @@ function extractTargetHint(text) {
 
 // ---------- 主函数 ----------
 
+// 待定类说法单独一组：只有在原文另有别的变更证据、或明确提到原安排时，
+// 才算补充通知的一部分；否则只是“信息还没写全”的普通通知。
+const PENDING_ONLY_PATCH_WORDS = ["另行通知", "待定", "暂定", "择期"];
+
+// 回指词：明确指向原安排的固定说法
+const BACK_REFERENCE_WORDS = ["原定", "原计划", "原安排", "原时间", "原地点"];
+
+// 原文里是否有待定类词以外的变更词命中
+// 复用 hasEffectivePatchWord 的既有过滤（补充通知固定说法、逾期不再受理），
+// 只是把整条原文里的待定类词先挖掉再判定。
+function hasNonPendingPatchWord(text) {
+  const s = String(text == null ? "" : text);
+  if (!containsAny(s, PENDING_ONLY_PATCH_WORDS)) return hasEffectivePatchWord(s);
+  let masked = s;
+  for (let i = 0; i < PENDING_ONLY_PATCH_WORDS.length; i++) {
+    const w = PENDING_ONLY_PATCH_WORDS[i];
+    while (masked.indexOf(w) !== -1) {
+      masked = masked.replace(w, " ");
+    }
+  }
+  return hasEffectivePatchWord(masked);
+}
+
 export function buildNoticePatch(rawText) {
   const text = rawText == null ? "" : String(rawText);
   const emptyResult = {
@@ -381,6 +404,37 @@ export function buildNoticePatch(rawText) {
     rawText: text,
   };
   if (!text.trim()) return emptyResult;
+
+  // 切句前的前置判断：只有命中下面任一条才提前返回，
+  // 其余情况维持原行为（另行通知照常进切句并记歧义）。
+  // 条件一：除“另行通知”外还出现了待定/暂定/择期这类“信息未写全”的说法。
+  // 条件二：第一句是完整通知抬头（关于……的通知），且整条原文
+  //         没有回指词、也没有别的变更词。
+  const hasOtherPendingWord = (function () {
+    for (let i = 0; i < PENDING_ONLY_PATCH_WORDS.length; i++) {
+      const w = PENDING_ONLY_PATCH_WORDS[i];
+      if (w === "另行通知") continue;
+      if (text.indexOf(w) !== -1) return true;
+    }
+    return false;
+  })();
+
+  const headSentence = splitSentences(text)[0];
+  const headText = headSentence ? String(headSentence.text).trim() : "";
+  const isFullNoticeHead =
+    headText.indexOf("关于") === 0 &&
+    headText.slice(-"的通知".length) === "的通知";
+
+  const noBackRefAndNoOtherPatch =
+    !containsAny(text, BACK_REFERENCE_WORDS) && !hasNonPendingPatchWord(text);
+
+  if (
+    containsAny(text, PENDING_ONLY_PATCH_WORDS) &&
+    noBackRefAndNoOtherPatch &&
+    (hasOtherPendingWord || isFullNoticeHead)
+  ) {
+    return emptyResult;
+  }
 
   const sentences = splitSentences(text);
   const changes = [];
