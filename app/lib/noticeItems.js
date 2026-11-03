@@ -411,6 +411,10 @@ export function buildItems(rawText, options) {
     let timeRaw = isSubmit
       ? (local.time || local.eventTime)
       : (local.eventTime || local.time);
+    // ---- 选结束时间：只有活动类要，手续类一律空 ----
+    let endTimeRaw = isSubmit
+      ? null
+      : (local.eventEndTime || local.endTime);
     // ---- 地点 / 材料 / 面向对象 都取本句的 ----
     const locRaw = local.location || null;
     const matsRaw =
@@ -418,6 +422,7 @@ export function buildItems(rawText, options) {
 
     dateRaw = dateRaw == null ? null : String(dateRaw).trim();
     timeRaw = timeRaw == null ? null : String(timeRaw).trim();
+    endTimeRaw = endTimeRaw == null ? null : String(endTimeRaw).trim();
 
     // ---- 一句里一个日期都抽不出来：不生成事项 ----
     if (!dateRaw) continue;
@@ -474,6 +479,7 @@ export function buildItems(rawText, options) {
       date: resolvedDate.date,
       dateText: dateText || null,
       time: time,
+      endTime: endTimeRaw || null,
       location: location,
       materials: materials,
       suggestions: suggestions,
@@ -484,6 +490,7 @@ export function buildItems(rawText, options) {
       status: {
         date: resolvedDate.dateStatus,
         time: time ? "ok" : "not_mentioned",
+        endTime: endTimeRaw ? "ok" : "not_mentioned",
         location: location ? "ok" : (isSubmit ? "not_mentioned" : "not_mentioned"),
         materials: isSubmit
           ? (materials.length > 0 ? "ok" : "not_mentioned")

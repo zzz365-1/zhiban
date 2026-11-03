@@ -32,6 +32,7 @@ export function buildSystemPrompt(today = new Date()) {
 - eventDate 只在真有第二个日期时才填。如果整篇只有一个日期，eventDate 一律填 null，不要和 deadline 填同一个日子。
 - 判断举办日看这些说法：定于，将于，举行，举办，召开，开始，开幕，开赛，决赛，初赛，上课，报到，集合，答辩，面试，体检。
 - eventTime 是活动举办的具体时间，24小时制 HH:MM，原文没写就填 null。注意“晚7点”是 19:00，不是 07:00。
+- eventEndTime 是活动结束的具体时间，24小时制 HH:MM。原文没写结束时间就填 null，绝对不许根据常识推测活动一般开多久，比如看到讲座就自己填两小时，这类一律填 null。
 
 json 的字段固定为：
 - title: 字符串，通知标题，没有则填 null
@@ -39,6 +40,7 @@ json 的字段固定为：
 - eventDate: 字符串，活动或者会议举办的日子，按上面规则返回，没有则填 null
 - time: 字符串，截止日当天的具体时间（24小时制 HH:MM），没有则填 null
 - eventTime: 字符串，活动举办的具体时间（24小时制 HH:MM），没有则填 null
+- eventEndTime: 字符串，活动结束的具体时间（24小时制 HH:MM），原文没写结束时间就填 null，不许推测活动时长
 - location: 字符串，地点，没有则填 null
 - materials: 字符串数组，需要提交或携带的材料清单，没有则填 null
 - audience: 字符串，面向对象，没有则填 null
@@ -50,7 +52,8 @@ json 的字段固定为：
 2. deadline 和 time 要分开。例如“11月15日下午5点前”，deadline 是“11月15日”，time 是“17:00”。eventDate 和 eventTime 同样分开。两个日期各有各的时间时不要串，活动的时间只能填进 eventTime，截止的时间只能填进 time。
 3. materials 要完整列出原文写到的每一件材料。括号里的补充说明不要放进 materials，只要材料名本身。
 4. audience 写成原文里的说法。如果原文有“@所有人”这类，audience 填“所有人”。
-5. 输出必须是合法 json，不要加 markdown 代码块，不要加解释。`;
+5. 输出必须是合法 json，不要加 markdown 代码块，不要加解释。
+6. eventEndTime 只写原文明确给出的活动结束时间。原文没给就填 null，不要用“通常开多久”“一般两小时”这类常识去补。`;
 }
 
 export const FEW_SHOT_EXAMPLE = `示例输入：

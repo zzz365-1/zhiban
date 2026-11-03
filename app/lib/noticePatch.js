@@ -864,6 +864,11 @@ export function applyPatch(items, patch, indexes, timestamp) {
         if (before === ch.to) continue;
         const wasDone = item.progress === "已办理";
         item.time = ch.to;
+        // 新的安排结束时间并不知道，原来的结束时间必须作废，
+        // 否则冲突判断会拿旧结束时间配上新开始时间，算出假的重叠。
+        item.endTime = null;
+        if (!item.status || typeof item.status !== "object") item.status = {};
+        item.status.endTime = "not_mentioned";
         detail.push({
           field: "time",
           from: before,

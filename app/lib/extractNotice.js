@@ -399,6 +399,183 @@ function extractTime(text, deadlineCand) {
   return null;
 }
 
+// ---------- 时间区间结束 ----------
+
+// 时间区间里的连接符：英文短横线、中文一字线、中文长破折号、波浪号、全角波浪号、到、至。
+// 【为什么单独列一张表而不写进字符类】
+// 全角波浪号和中文一字线在源码里很容易被编辑器自动转成别的字符，
+// 单独列在这里，将来出问题只看这一处。
+const TIME_RANGE_DASH = ["-", "—", "–", "~", "～", "到", "至"];
+
+// 带时段词的时间写法。时段词表与 extractTime 保持一致，
+// 长词必须排在短词前面（晚上在晚之前）。
+const TIME_AMPM_SRC =
+  "(上午|下午|中午|晚上|晚|凌晨|早上|早晨|傍晚)[ ]*([0-9]{1,2})[ ]*[点时]" +
+  "(?:[ ]*([0-9]{1,2})[ ]*分?)?(?:[ ]*半)?";
+
+// 冒号时间：英文冒号或中文冒号。
+const TIME_COLON_SRC = "(?<![0-9])([0-9]{1,2})[ ]*[:：][ ]*([0-9]{2})(?![0-9])";
+
+// 点/时时间，无时段词。
+const TIME_HOUR_SRC = "([0-9]{1,2})[ ]*[点时](?:[ ]*([0-9]{1,2})[ ]*分?)?(?:[ ]*半)?";
+
+/**
+ * 与 timeScopeFor 相同的切句逻辑，复写一份，避免回头改到 extractTime 的老路径。
+ * 有日期候选就取它所在的那一小句；句太长按字数截断。
+ */
+function rangeScopeFor(text, cand) {
+  if (!cand) return text;
+  let start = 0;
+  for (let i = cand.index - 1; i >= 0; i--) {
+    if (CLAUSE_SPLIT.test(text[i])) {
+      start = i + 1;
+      break;
+    }
+  }
+  let end = text.length;
+  for (let i = cand.end; i < text.length; i++) {
+    if (CLAUSE_SPLIT.test(text[i])) {
+      end = i;
+      break;
+    }
+  }
+  if (cand.index - start > 20) start = cand.index - 20;
+  if (end - cand.end > 25) end = cand.end + 25;
+  return text.slice(start, Math.max(end, cand.end));
+}
+
+/**
+ * 在一段文本的指定位置按顺序试三种写法，命中就返回
+ * { h, min, ampm, end }，end 是匹配结束的绝对下标；都不中返回 null。
+ *
+ * 三种写法的优先级与 extractTime 一致：带时段词 → 冒号 → 点/时。
+ * 但这里是“紧贴当前位置”匹配，所以统一加 ^ 锚定。
+ */
+function matchTimeAt(scope, from) {
+  const rest = scope.slice(from);
+
+  let m = rest.match(new RegExp("^" + TIME_AMPM_SRC));
+  if (m) {
+    const h = parseInt(m[2], 10);
+    const min = m[3] ? parseInt(m[3], 10) : /半/.test(m[0]) ? 30 : 0;
+    return { h, min, ampm: m[1], end: from + m[0].length };
+  }
+
+  m = rest.match(new RegExp("^" + TIME_COLON_SRC));
+  if (m) {
+    return {
+      h: parseInt(m[1], 10),
+      min: parseInt(m[2], 10),
+      ampm: null,
+      end: from + m[0].length,
+    };
+  }
+
+  m = rest.match(new RegExp("^" + TIME_HOUR_SRC));
+  if (m) {
+    const h = parseInt(m[1], 10);
+    const min = m[2] ? parseInt(m[2], 10) : /半/.test(m[0]) ? 30 : 0;
+    return { h, min, ampm: null, end: from + m[0].length };
+  }
+
+  return null;
+}
+
+/**
+ * 把 h/min/ampm 换算成 24 小时制的分钟数。
+ * inheritAmpm 只在结束那头没写时段词时传入开始那头的时段词。
+ *
+ * 换算规则与 extractTime 对齐：
+ *   下午/晚上/晚/傍晚/中午 且 h < 12 → h += 12
+ *   凌晨 且 h === 12 → h = 0
+ */
+function toMinutes(h, min, ampm, inheritAmpm) {
+  let hour = h;
+  const tag = ampm || inheritAmpm || null;
+  if (tag) {
+    if (/(下午|晚上|晚|傍晚|中午)/.test(tag) && hour < 12) hour += 12;
+    if (/凌晨/.test(tag) && hour === 12) hour = 0;
+  }
+  return hour * 60 + min;
+}
+
+function toHHMM(totalMinutes) {
+  const h = Math.floor(totalMinutes / 60);
+  const min = totalMinutes % 60;
+  return String(h).padStart(2, "0") + ":" + String(min).padStart(2, "0");
+}
+
+/**
+ * 抽时间区间的结束时间，例如“十四点到十六点”返回 16:00。
+ *
+ * 【为什么找不到就返回空，不猜】
+ * 现在是给冲突判断供数的，结束时间错了比没有更糟：
+ * 两个本该重叠的活动被判成不重叠，用户直接漏掉。
+ * 所以连接符后面只要不是时间（日期、地点、标点），一律返回空。
+ */
+export function extractTimeRangeEnd(text, dateCand) {
+  if (!text) return null;
+
+  const scope = rangeScopeFor(text, dateCand);
+
+  // 找区间起点：从最左边开始扫，遇到第一个能匹配上的时间就算开始。
+  // 不能只试 scope 开头，前面可能有“时间：”这类引导语。
+  let startMatch = null;
+  for (let i = 0; i < scope.length; i++) {
+    // 只在可能的起始字符上尝试，避免每个字都跑三遍正则。
+    if (!/[0-9一二三四五六七八九十上午下午中午晚上晚凌晨早晨傍晚]/.test(scope[i])) {
+      continue;
+    }
+    const m = matchTimeAt(scope, i);
+    if (m) {
+      startMatch = m;
+      break;
+    }
+  }
+  if (!startMatch) return null;
+
+  // 连接符前允许空格。
+  let p = startMatch.end;
+  while (p < scope.length && scope[p] === " ") p++;
+
+  // 必须是一个连接符。
+  let dash = null;
+  for (const d of TIME_RANGE_DASH) {
+    if (scope.startsWith(d, p)) {
+      dash = d;
+      break;
+    }
+  }
+  if (!dash) return null;
+  p += dash.length;
+
+  // 连接符后允许空格。
+  while (p < scope.length && scope[p] === " ") p++;
+
+  // 连接符后必须紧跟时间，否则视为区间不成立，直接返回空。
+  const endMatch = matchTimeAt(scope, p);
+  if (!endMatch) return null;
+
+  // 结束那头自己写了时段词就用它自己的，没写才继承开始那头的。
+  const startMin = toMinutes(
+    startMatch.h,
+    startMatch.min,
+    startMatch.ampm,
+    null
+  );
+  const endMin = toMinutes(
+    endMatch.h,
+    endMatch.min,
+    endMatch.ampm,
+    startMatch.ampm
+  );
+
+  // 结束必须严格大于开始；相等或更小一律算无效（含跨午夜）。
+  if (endMin <= startMin) return null;
+
+  return toHHMM(endMin);
+}
+
 // ---------- 地点 ----------
 
 const LOCATION_KEYWORDS = [
@@ -1485,6 +1662,8 @@ export function extractNotice(text) {
     eventDate: null,
     eventTime: null,
     time: null,
+    endTime: null,
+    eventEndTime: null,
     location: null,
     materials: [],
     audience: null,
@@ -1499,6 +1678,10 @@ export function extractNotice(text) {
   result.eventDate = eventCand ? eventCand.text : null;
   result.eventTime = eventCand ? extractTime(clean, eventCand) : null;
   result.time = extractTime(clean, deadlineCand);
+  result.eventEndTime = result.eventTime
+    ? extractTimeRangeEnd(clean, eventCand)
+    : null;
+  result.endTime = result.time ? extractTimeRangeEnd(clean, deadlineCand) : null;
   result.location = extractLocation(clean);
   result.materials = extractMaterials(clean);
   result.audience = extractAudience(clean);

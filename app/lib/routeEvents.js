@@ -45,6 +45,7 @@ export function buildRouteEvents(notices) {
           String(d.getHours()).padStart(2, "0") +
           ":" +
           String(d.getMinutes()).padStart(2, "0"),
+        endTime: "",
         ts: n.deadlineDate,
         location: (n.analysis && n.analysis.location) || "",
         materials: (n.analysis && n.analysis.materials) || [],
@@ -73,6 +74,7 @@ export function buildRouteEvents(notices) {
           String(ts.getHours()).padStart(2, "0") +
           ":" +
           String(ts.getMinutes()).padStart(2, "0"),
+        endTime: (item && item.endTime) || "",
         ts: tsNum,
         location: item.location || "",
         materials: item.materials || [],
