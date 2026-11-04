@@ -28,7 +28,9 @@ function firstLine(t) {
   const lines = String(t || "").split(String.fromCharCode(10));
   for (const line of lines) {
     const s = line.trim();
-    if (s) return s.length > 40 ? s.slice(0, 40) + "…" : s;
+    // 与 page.js 的 deriveTitle 保持一致：截三十字加省略号，
+    // 免得同一条通知保存前后标题跳变。
+    if (s) return s.length > 30 ? s.slice(0, 30) + "…" : s;
   }
   return "未命名通知";
 }
@@ -43,7 +45,7 @@ function Row({ label, value }) {
   );
 }
 
-export default function MultiResultPanel({ items }) {
+export default function MultiResultPanel({ items, onSave, canSave, saveLabel }) {
   if (!items || items.length === 0) return null;
 
   return (
@@ -52,9 +54,16 @@ export default function MultiResultPanel({ items }) {
         <span className="text-sm font-semibold text-slate-700">
           共 {items.length} 条结果
         </span>
-        <span className="text-xs text-slate-400">
-          确认没问题就点上面的「保存到我的通知」
-        </span>
+        <button
+          type="button"
+          onClick={() => {
+            if (onSave) onSave();
+          }}
+          disabled={!onSave || !canSave}
+          className="inline-flex h-9 items-center rounded-[10px] bg-[#1D4ED8] px-3 text-[13px] font-medium text-white transition-colors duration-200 ease-out hover:bg-[#1E40AF] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400 motion-reduce:transition-none"
+        >
+          {saveLabel || "保存到我的通知"}
+        </button>
       </div>
 
       <ul className="min-h-0 flex-1 divide-y divide-slate-100 overflow-y-auto px-5 py-3">

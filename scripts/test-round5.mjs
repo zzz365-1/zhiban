@@ -181,11 +181,19 @@ check(
   pageSrc.includes("items: buildItems(text, baseOpts)"),
   true
 );
+// 新写法先把基准存进 baseOpts 再复用给 parseOne 和 buildItems。
+// 不能只认老的内联写法，也不能放宽成"出现过 publishedAt 就算"——
+// 那样把基准漏传给 parseOne 也会绿。所以这里钉三件事：
+//   1) 循环里声明了 baseOpts，值是 publishedAt 空串兜底
+//   2) parseOne(t, baseOpts) 真的用上了这个变量
+//   3) 同样的基准也给了 buildItems(t, baseOpts)
+const splitBaseDeclared =
+  /const baseOpts = \{ publishedAt: publishedAt \|\| "" \};/.test(pageSrc);
+const splitParseUsesBase = pageSrc.includes("parseOne(t, baseOpts)");
+const splitItemsUseBase = pageSrc.includes("buildItems(t, baseOpts)");
 check(
   "接线 多通知逐条解析也传基准",
-  pageSrc.includes(
-    "parseOne(t, { publishedAt: publishedAt || \"\" })"
-  ),
+  splitBaseDeclared && splitParseUsesBase && splitItemsUseBase,
   true
 );
 check(

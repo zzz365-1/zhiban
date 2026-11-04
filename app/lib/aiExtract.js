@@ -410,11 +410,18 @@ export function mergeAIResult(ruleResult, aiResult, sourceText) {
     });
   }
 
+  // 结束时间：本地规则抓到就优先用，没有就退回模型给的值，都没有就是 null。
+  // 只补字段，不动上面已经算好的 deadline / time / eventDate / eventTime。
+  const endTime = base.endTime || aiResult.endTime || null;
+  const eventEndTime = base.eventEndTime || aiResult.eventEndTime || null;
+
   return {
     deadline: finalDeadline,
     time: finalTime,
     eventDate,
     eventTime,
+    endTime,
+    eventEndTime,
     location: finalLocation,
     materials: finalMaterials,
     audience: finalAudience,

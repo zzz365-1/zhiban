@@ -62,7 +62,10 @@ export default function NewNoticeDialog({
     }
     const parsed = parseUserDateInput(raw.trim());
     if (!parsed || !parsed.date || Number.isNaN(parsed.date.getTime())) {
-      // 输入暂时不合法：不清空上层值也不覆盖，等用户继续输入
+      // 输入暂时不合法：草稿保留方便继续改，但把上层值清成空串，
+      // 别让解析拿上一次填的旧日期当基准
+      setLastCommitted("");
+      if (onPublishedAtChange) onPublishedAtChange("");
       return;
     }
     const normalizedDash = toDashDate(parsed.date);
@@ -79,7 +82,7 @@ export default function NewNoticeDialog({
     : "把一条通知的原文粘贴到这里";
 
   const isEmpty = !value || value.trim() === "";
-  const parseDisabled = isEmpty || !!parsing;
+  const parseDisabled = isEmpty || !!parsing || !!dateError;
 
   return (
     <Modal

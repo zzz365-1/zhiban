@@ -86,6 +86,7 @@ function sourceLabel(source) {
   if (source === "manual") return "手动修正";
   if (source === "mixed") return "模型补充";
   if (source === "rule_fallback") return "本地识别";
+  if (source === "rule") return "本地识别";
   return "手动导入";
 }
 
@@ -283,13 +284,42 @@ export default function Home() {
   function handleHighlightSpan(span) {
     const el = document.getElementById("notice-text");
     if (!el) return;
+
+    // 传进来的可能是历史记录里的原句字符串，也可能是带下标的对象；
+    // 统一换算出当前原文里真实存在的 [start, end)，算不出来就不选。
+    let start = null;
+    let end = null;
+    if (typeof span === "string") {
+      const needle = span;
+      if (!needle) return;
+      const at = el.value.indexOf(needle);
+      if (at < 0) return;
+      start = at;
+      end = at + needle.length;
+    } else if (span && typeof span === "object") {
+      const s = span.start;
+      const e = span.end;
+      const len = el.value.length;
+      if (
+        Number.isInteger(s) &&
+        Number.isInteger(e) &&
+        s >= 0 &&
+        e <= len &&
+        s < e
+      ) {
+        start = s;
+        end = e;
+      }
+    }
+    if (start === null || end === null) return;
+
     el.focus();
-    el.setSelectionRange(span.start, span.end);
+    el.setSelectionRange(start, end);
     // 把选中位置滚动到可见处
     const lineHeight = 24;
     const approxTop = Math.max(
       0,
-      el.value.slice(0, span.start).split(String.fromCharCode(10)).length *
+      el.value.slice(0, start).split(String.fromCharCode(10)).length *
         lineHeight -
         el.clientHeight / 2
     );
@@ -418,12 +448,18 @@ export default function Home() {
       }
       try {
         // 每条都用同一个基准，循环里只读不写
-        const r = await parseOne(t, { publishedAt: publishedAt || "" });
+        const baseOpts = { publishedAt: publishedAt || "" };
+        const r = await parseOne(t, baseOpts);
         const src = r.analysis._source;
+        // 和单条解析一个口径补事项，否则详情里显示"没有拆出具体事项"
+        const withItems = {
+          ...r.analysis,
+          items: buildItems(t, baseOpts),
+        };
         results.push({
           text: t,
           status: src === "rule_fallback" ? "fallback" : "success",
-          analysis: r.analysis,
+          analysis: withItems,
           errorMsg: r.error ? String(r.error.message || r.error.code || "") : "",
         });
       } catch (e) {
@@ -436,6 +472,10 @@ export default function Home() {
       }
     }
     setBatchResults(results);
+    // 批量结果已经生成，原文与结果一致，清掉待重新解析标记，
+    // 否则 save 按钮永远灰、顶部一直挂着提示。
+    // 切分弹窗取消走不到这里，dirty 不会被误清。
+    setDirty(false);
     setParsing(false);
     setShowNew(false);
     setView("notices");
@@ -665,6 +705,11 @@ export default function Home() {
           source: sourceLabel(item.analysis._source),
           text: item.text,
           analysis: item.analysis,
+          // 事项和单条一样存顶层的 items；解析结果里没有就现场补一份
+          items:
+            (item.analysis && Array.isArray(item.analysis.items))
+              ? item.analysis.items
+              : buildItems(item.text, { publishedAt: publishedAt || "" }),
           // 批量的每条都用同一个基准，存下来供日后补事项
           publishedAt: publishedAt || "",
           deadlineDate: deadlineDate ? deadlineDate.getTime() : null,
@@ -1032,7 +1077,18 @@ export default function Home() {
               <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
                 {inputMode === "multi" && batchResults.length > 0 ? (
                   <div className="h-full overflow-y-auto">
-                    <MultiResultPanel items={batchResults} />
+                    <MultiResultPanel
+                      items={batchResults}
+                      onSave={handleSave}
+                      canSave={!dirty && batchSavable > 0 && !parsing}
+                      saveLabel={
+                        parsing
+                          ? "解析中…"
+                          : batchSavable > 0
+                          ? "保存 " + batchSavable + " 条到我的通知"
+                          : "保存到我的通知"
+                      }
+                    />
                   </div>
                 ) : (
                   <NoticeDetail

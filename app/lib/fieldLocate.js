@@ -23,6 +23,23 @@ export function locateTokenInText(text, token) {
   return null;
 }
 
+// 在原文里定位界面显示的标题文字，返回 { start, end } 或 null。
+// 标题不是抽取字段，显示文字来自 getNoticeTitle，可能被截成前四十字加省略号。
+// 定位时先去掉末尾省略号，再按前缀在原文里找，找不到返回 null。
+export function findTitleSpan(text, displayText) {
+  if (!text || !displayText) return null;
+
+  const suffix = "…";
+  const prefix = displayText.endsWith(suffix)
+    ? displayText.slice(0, displayText.length - suffix.length)
+    : displayText;
+  if (!prefix) return null;
+
+  const at = text.indexOf(prefix);
+  if (at === -1) return null;
+  return { start: at, end: at + prefix.length };
+}
+
 // 在原文里定位字段值，返回 { start, end } 或 null。
 // - 程序换算出来的日期（_inferredDeadline）视为原文没有，返回 null
 // - 空字段返回 null

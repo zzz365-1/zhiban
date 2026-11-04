@@ -6,7 +6,7 @@ import PatchHistory from "./PatchHistory";
 import { parseUserDateInput } from "../lib/deadline.js";
 import { getNoticeTitle } from "../lib/shareText.js";
 import { shortParseErrorLabel, describeParseError, isFuzzyDate } from "../lib/aiExtract.js";
-import { findSpan } from "../lib/fieldLocate.js";
+import { findSpan, findTitleSpan } from "../lib/fieldLocate.js";
 
 const FIELDS = [
   { key: "title", label: "标题", editable: true, full: true },
@@ -127,16 +127,41 @@ export default function AnalysisPanel({
   function handleLocate(field, isEmpty) {
     setNotFoundKey(null);
     setNotFoundMsg("");
+    // 摘要和分类不是从原文抄出来的值，点击不做出处定位，也不报红字
+    if (field.key === "summary" || field.key === "category") return;
     if (isEmpty) return; // 空字段不高亮、不报错
+
+    if (field.key === "title") {
+      const displayText = getDisplayText(
+        field,
+        analysis,
+        selectedNotice,
+        draftText
+      );
+      const titleSpan = findTitleSpan(draftText, displayText);
+      if (!titleSpan) {
+        setNotFoundKey(field.key);
+        setNotFoundMsg("原文里没找到这段内容，请自行核对。");
+        return;
+      }
+      if (onFieldClick) onFieldClick(titleSpan);
+      return;
+    }
 
     const span = findSpan(draftText, field, analysis);
     if (!span) {
       setNotFoundKey(field.key);
-      setNotFoundMsg(
-        field.key === "deadline" && analysis._inferredDeadline
-          ? "这个日期是按今天换算出来的，原文里没有对应日期。"
-          : "原文里没找到这段内容，请自行核对。"
-      );
+      if (field.key === "deadline" && analysis._inferredDeadline) {
+        setNotFoundMsg("这个日期是按今天换算出来的，原文里没有对应日期。");
+      } else if (field.key === "deadline" && analysis._locallyResolved) {
+        setNotFoundMsg("这个日期是按发布日期换算出来的，原文里没有对应日期。");
+      } else if (field.key === "deadline" && analysis._datePending) {
+        setNotFoundMsg("日期待确认，这个日期是按发布日期换算出来的。");
+      } else if (field.key === "time" || field.key === "eventTime") {
+        setNotFoundMsg("这里是换算后的二十四小时制写法，原文里可能写作另一种时间说法。");
+      } else {
+        setNotFoundMsg("原文里没找到这段内容，请自行核对。");
+      }
       return;
     }
     if (onFieldClick) onFieldClick(span);
@@ -245,7 +270,8 @@ export default function AnalysisPanel({
                 selectedNotice,
                 draftText
               );
-              const isEmpty = text === "未识别" || text === "未分类";
+              const isEmpty =
+                text === "未识别" || text === "未分类" || text === "暂无摘要";
               const showInferredHint =
                 field.key === "deadline" &&
                 analysis._inferredDeadline &&

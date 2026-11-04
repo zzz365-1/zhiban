@@ -114,6 +114,10 @@ export async function POST(request) {
         audience: normalizeStr(parsed.audience),
         summary: normalizeStr(parsed.summary),
         category: normalizeStr(parsed.category),
+        eventDate: normalizeStr(parsed.eventDate),
+        eventTime: normalizeStr(parsed.eventTime),
+        eventEndTime: normalizeStr(parsed.eventEndTime),
+        endTime: normalizeStr(parsed.endTime),
       },
     });
   } catch (err) {

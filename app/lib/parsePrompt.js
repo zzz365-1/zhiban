@@ -63,7 +63,7 @@ export const FEW_SHOT_EXAMPLE = `示例输入：
 {"title":"名单报送通知","deadline":"11月15日","eventDate":null,"time":"17:00","eventTime":null,"location":"教务处A301办公室","materials":["名单"],"audience":"各班班长","summary":"各班班长于11月15日17:00前报送名单","category":"行政"}`;
 
 export function buildUserMessage(text) {
-  return FEW_SHOT_EXAMPLE + "\\\\n\\\\n现在请处理这条通知：\\\\n" + text;
+  return FEW_SHOT_EXAMPLE + "\n\n现在请处理这条通知：\n" + text;
 }
 
 export function buildMessages(text, today = new Date()) {
