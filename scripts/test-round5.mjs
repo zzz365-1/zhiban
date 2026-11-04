@@ -222,21 +222,64 @@ check(
   migrateSrc.includes("buildItems(text, { publishedAt: base })"),
   true
 );
-check("弹窗 有日期输入框", dialogSrc.includes("type=\"date\""), true);
+// 弹窗发布日期入口：普通文本输入 + 本地草稿 + 标准写法回写
 check(
-  "弹窗 日期框受状态控制",
-  dialogSrc.includes("value={publishedAt || \"\"}"),
+  "弹窗 发布日期框是普通文本输入",
+  dialogSrc.includes("id=\"notice-publish-date\"") &&
+    /id="notice-publish-date"[\s\S]*?type="text"/.test(dialogSrc),
   true
 );
 check(
-  "弹窗 日期框变化会回写状态",
-  dialogSrc.includes("onPublishedAtChange(e.target.value)"),
+  "弹窗 输入框受本地草稿控制",
+  dialogSrc.includes("value={dateDraft}"),
+  true
+);
+check(
+  "弹窗 输入变化走本地草稿处理函数",
+  dialogSrc.includes("handleDateChange(e.target.value)"),
+  true
+);
+check(
+  "弹窗 草稿初始取上层值且空串兜底",
+  dialogSrc.includes("useState(publishedAt || \"\")"),
+  true
+);
+check(
+  "弹窗 空着时有中文示例占位",
+  dialogSrc.includes("placeholder=\"例如：2026年11月3日\""),
+  true
+);
+check(
+  "弹窗 合法输入转成纯数字短横线写法回写",
+  dialogSrc.includes("const normalizedDash = toDashDate(parsed.date);") &&
+    dialogSrc.includes("onPublishedAtChange(normalizedDash)"),
+  true
+);
+check(
+  "弹窗 留空立刻回传空值",
+  dialogSrc.includes("setLastCommitted(\"\")") &&
+    dialogSrc.includes("if (onPublishedAtChange) onPublishedAtChange(\"\");"),
+  true
+);
+check(
+  "弹窗 输入不合法给中文提醒",
+  dialogSrc.includes("日期没认出来"),
   true
 );
 check(
   "弹窗 有留空保持待确认的说明",
   dialogSrc.includes("留空就保持待确认"),
   true
+);
+
+// 反向断言：界面上不再出现那种半中半洋的日期控件
+check(
+  "反向 弹窗不许再出现日期控件",
+  dialogSrc.includes("type=\"date\"") ||
+    dialogSrc.includes("type='date'") ||
+    dialogSrc.includes("value={publishedAt || \"\"}") ||
+    dialogSrc.includes("onPublishedAtChange(e.target.value)"),
+  false
 );
 check(
   "反向 页面不许再出现丢掉基准的 parseOne 调用",

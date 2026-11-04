@@ -262,14 +262,14 @@ export default function AnalysisPanel({
                   key={field.key}
                   className={field.full ? "col-span-2" : ""}
                 >
-                  <div className="group mb-1 flex items-center justify-between">
+                  <div className="group mb-0.5 flex items-center justify-between">
                     <div className="flex items-center gap-1.5">
                       <p className="text-xs font-semibold text-slate-500">
                         {field.label}
                       </p>
                       {field.ai && (
                         <span className="rounded bg-slate-100 px-1 py-0.5 text-[10px] font-medium text-slate-400">
-                          AI
+                          模型
                         </span>
                       )}
                       {analysis._source === "ai" && field.editable && (
@@ -368,7 +368,8 @@ export default function AnalysisPanel({
                 </div>
               );
             })}
-            <div className="border-t border-slate-100 pt-3">
+            </div>
+            <div className="mt-4 border-t border-slate-200 pt-3">
               <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
                 事项清单
               </h3>
@@ -399,7 +400,6 @@ export default function AnalysisPanel({
                 }
                 onLocate={onFieldClick}
               />
-            </div>
             </div>
           </div>
         )}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { StatusPill, Button, EmptyState, Modal } from "./ui/ZbUI.js";
 import { IconList, IconSpinner } from "./ui/Icons.js";
 
@@ -29,6 +29,13 @@ export default function NoticeDetail({
   // 折叠状态只在这一层记，默认展开
   const [collapsed, setCollapsed] = useState(false);
   const [showRaw, setShowRaw] = useState(false);
+  // 原文框跟随内容自适应高度：短内容整段展开，长内容由上层滚动容器滚
+  useEffect(() => {
+    const el = document.getElementById("notice-text");
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [text, collapsed]);
 
   const isEmpty = !text && !analysis;
 
@@ -108,78 +115,65 @@ export default function NoticeDetail({
           />
         </div>
       ) : (
-        <div className="flex min-h-0 flex-1">
-          {/* 左栏：原文 */}
-          <div
-            className={[
-              "flex-none overflow-hidden border-r border-[#E2E8F0]",
-              "transition-[width] duration-200 ease-out motion-reduce:transition-none",
-              collapsed ? "w-[96px]" : "w-[44%] min-w-[360px]",
-            ]
-              .filter(Boolean)
-              .join(" ")}
-          >
-            {collapsed ? (
-              <div className="flex h-full flex-col items-center justify-start gap-3 bg-white px-2 py-4">
-                <div
-                  className="text-[13px] font-bold tracking-wide text-[#64748B]"
-                  style={{ writingMode: "vertical-rl" }}
-                >
+        <div className="flex min-h-0 flex-1 flex-col">
+          {/* 上区：原文（按内容自适应高度，过长时自身可滚） */}
+          {collapsed ? (
+            <div className="flex flex-none items-center justify-between gap-2 border-b border-[#E2E8F0] bg-white px-4 py-2">
+              <span className="text-[13px] font-bold tracking-wide text-[#64748B]">
+                通知原文
+              </span>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setCollapsed(false)}
+              >
+                展开
+              </Button>
+            </div>
+          ) : (
+            <div className="flex max-h-[40%] min-h-0 flex-none flex-col overflow-y-auto border-b border-[#E2E8F0] bg-white">
+              <div className="sticky top-0 z-10 flex flex-none items-center justify-between gap-2 border-b border-[#E2E8F0] bg-white px-4 py-2">
+                <span className="text-[13px] font-bold text-[#64748B]">
                   通知原文
-                </div>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => setCollapsed(false)}
-                >
-                  展开
-                </Button>
-              </div>
-            ) : (
-              <div className="h-full overflow-y-auto p-4">
-                <div className="rounded-[12px] border border-[#E2E8F0] bg-white p-4">
-                  <div className="mb-3 flex items-center justify-between gap-2">
-                    <span className="text-[13px] font-bold text-[#64748B]">
-                      通知原文
-                    </span>
-                    <div className="flex items-center gap-2">
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => setCollapsed(true)}
-                      >
-                        折叠
-                      </Button>
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => setShowRaw(true)}
-                      >
-                        独立查看
-                      </Button>
-                    </div>
-                  </div>
-                  {/* 编号不能改：现有高亮功能靠它定位文本域 */}
-                  <textarea
-                    id="notice-text"
-                    value={text}
-                    onChange={(e) => onTextChange && onTextChange(e.target.value)}
-                    readOnly={readOnly}
-                    className={[
-                      "zb-input min-h-[400px] w-full resize-none leading-[1.8]",
-                      readOnly ? "bg-slate-50" : "bg-white",
-                    ]
-                      .filter(Boolean)
-                      .join(" ")}
-                  />
+                </span>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setCollapsed(true)}
+                  >
+                    折叠
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setShowRaw(true)}
+                  >
+                    独立查看
+                  </Button>
                 </div>
               </div>
-            )}
-          </div>
+              <div className="flex-none px-4 pb-4">
+                {/* 编号不能改：现有高亮功能靠它定位文本域 */}
+                <textarea
+                  id="notice-text"
+                  value={text}
+                  onChange={(e) => onTextChange && onTextChange(e.target.value)}
+                  readOnly={readOnly}
+                  className={[
+                    "zb-input block w-full resize-none overflow-hidden leading-[1.8]",
+                    readOnly ? "bg-slate-50" : "bg-white",
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
+                />
+              </div>
+            </div>
+          )}
 
-          {/* 右栏：详情面板 */}
-          <div className="min-w-0 flex-1 overflow-hidden bg-[#F5F7FB] px-5 py-5">
-            <div className="h-full overflow-y-auto">{children}</div>
+          {/* 下区：详情面板（占满剩余高度，自身可滚） */}
+          <div className="min-h-0 flex-1 overflow-y-auto bg-[#F5F7FB] px-5 pt-3 pb-5">
+            {children}
           </div>
         </div>
       )}

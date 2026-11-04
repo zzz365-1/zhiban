@@ -1,6 +1,9 @@
 "use client";
 
+import { useState } from "react";
+
 import { Modal, Button } from "./ui/ZbUI.js";
+import { parseUserDateInput } from "../lib/deadline.js";
 
 const MODES = [
   { key: "single", label: "单条通知" },
@@ -20,6 +23,52 @@ export default function NewNoticeDialog({
   onPublishedAtChange,
 }) {
   const isMulti = mode === "multi";
+
+  // 发布日期输入框的本地草稿：避免上层只回传标准格式时吞掉打字中间态
+  const [dateDraft, setDateDraft] = useState(publishedAt || "");
+
+  // 上一次回传给上层/最后一次由上层同步进来的标准值，用于判断是否需要重置草稿
+  const [lastCommitted, setLastCommitted] = useState(publishedAt || "");
+
+  // 外部值变化（例如弹窗重开、上层刷新）时同步草稿
+  if ((publishedAt || "") !== lastCommitted) {
+    setLastCommitted(publishedAt || "");
+    setDateDraft(publishedAt || "");
+  }
+
+  function toDashDate(date) {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, "0");
+    const d = String(date.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  }
+
+  const trimmedDraft = (dateDraft || "").trim();
+  let dateError = "";
+  if (trimmedDraft !== "") {
+    const parsed = parseUserDateInput(trimmedDraft);
+    if (!parsed || !parsed.date || Number.isNaN(parsed.date.getTime())) {
+      dateError = "日期没认出来，请按「2026年11月3日」或「2026-11-03」这样的写法填写。";
+    }
+  }
+
+  function handleDateChange(raw) {
+    setDateDraft(raw);
+    if (raw.trim() === "") {
+      // 留空就是留空，绝不补今天
+      setLastCommitted("");
+      if (onPublishedAtChange) onPublishedAtChange("");
+      return;
+    }
+    const parsed = parseUserDateInput(raw.trim());
+    if (!parsed || !parsed.date || Number.isNaN(parsed.date.getTime())) {
+      // 输入暂时不合法：不清空上层值也不覆盖，等用户继续输入
+      return;
+    }
+    const normalizedDash = toDashDate(parsed.date);
+    setLastCommitted(normalizedDash);
+    if (onPublishedAtChange) onPublishedAtChange(normalizedDash);
+  }
 
   const hint = isMulti
     ? "一次粘贴好几条，通知之间要空一行，解析前会先让你确认怎么切分。"
@@ -101,16 +150,45 @@ export default function NewNoticeDialog({
         </label>
         <input
           id="notice-publish-date"
-          type="date"
-          value={publishedAt || ""}
+          type="text"
+          inputMode="text"
+          autoComplete="off"
+          value={dateDraft}
+          placeholder="例如：2026年11月3日"
+          aria-invalid={dateError ? "true" : undefined}
+          aria-describedby={
+            dateError ? "notice-publish-date-error" : "notice-publish-date-hint"
+          }
           onChange={(e) => {
-            if (onPublishedAtChange) onPublishedAtChange(e.target.value);
+            handleDateChange(e.target.value);
+          }}
+          onBlur={() => {
+            // 失焦时若草稿是合法日期，统一回显成标准写法；留空保持空
+            if (trimmedDraft === "") return;
+            const parsed = parseUserDateInput(trimmedDraft);
+            if (parsed && parsed.date && !Number.isNaN(parsed.date.getTime())) {
+              const normalizedDash = toDashDate(parsed.date);
+              setDateDraft(normalizedDash);
+              setLastCommitted(normalizedDash);
+            }
           }}
           className="zb-input mt-2 w-full"
         />
-        <p className="mt-1.5 text-[12px] leading-relaxed text-[#64748B]">
-          原文里有「下周三」「明天」这种说法时，填上发布日期才能换算成具体日期；留空就保持待确认。
-        </p>
+        {dateError ? (
+          <p
+            id="notice-publish-date-error"
+            className="mt-1.5 text-[12px] leading-relaxed text-[#DC2626]"
+          >
+            {dateError}
+          </p>
+        ) : (
+          <p
+            id="notice-publish-date-hint"
+            className="mt-1.5 text-[12px] leading-relaxed text-[#64748B]"
+          >
+            原文里有「下周三」「明天」这种说法时，填上发布日期才能换算成具体日期；留空就保持待确认。
+          </p>
+        )}
       </div>
 
       {/* 文本输入 */}
@@ -120,8 +198,13 @@ export default function NewNoticeDialog({
           if (onChange) onChange(e.target.value);
         }}
         placeholder={placeholder}
-        className="zb-input mt-3 w-full resize-none leading-[1.8]"
-        style={{ minHeight: 240 }}
+        className="zb-input mt-3 block w-full resize-none leading-[1.8]"
+        style={{ minHeight: 120, maxHeight: "45vh", overflowY: "auto" }}
+        onInput={(e) => {
+          // 先按内容收缩再撑开，避免只增不减
+          e.currentTarget.style.height = "auto";
+          e.currentTarget.style.height = `${e.currentTarget.scrollHeight}px`;
+        }}
       />
     </Modal>
   );

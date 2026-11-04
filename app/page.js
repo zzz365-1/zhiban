@@ -84,7 +84,7 @@ function filterNotices(notices, query, category) {
 
 function sourceLabel(source) {
   if (source === "manual") return "手动修正";
-  if (source === "mixed") return "AI 辅助";
+  if (source === "mixed") return "模型补充";
   if (source === "rule_fallback") return "本地识别";
   return "手动导入";
 }
