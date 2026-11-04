@@ -5,7 +5,7 @@ import ItemsPanel from "./ItemsPanel";
 import PatchHistory from "./PatchHistory";
 import { parseUserDateInput } from "../lib/deadline.js";
 import { getNoticeTitle } from "../lib/shareText.js";
-import { shortParseErrorLabel, describeParseError } from "../lib/aiExtract.js";
+import { shortParseErrorLabel, describeParseError, isFuzzyDate } from "../lib/aiExtract.js";
 import { findSpan } from "../lib/fieldLocate.js";
 
 const FIELDS = [
@@ -250,7 +250,8 @@ export default function AnalysisPanel({
                 field.key === "deadline" &&
                 analysis._inferredDeadline &&
                 !isEmpty &&
-                !isEditing;
+                !isEditing &&
+                !isFuzzyDate(text);
               const showPendingDateHint =
                 field.key === "deadline" &&
                 Boolean(analysis._datePending) &&

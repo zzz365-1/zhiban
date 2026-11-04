@@ -32,7 +32,9 @@ export function migrateNotice(n) {
   let items = [];
   try {
     const text = n.text == null ? "" : String(n.text);
-    const built = buildItems(text);
+    // 老通知可能已经存过发布日期，有就用，没有就传空串保持待确认
+    const base = typeof n.publishedAt === "string" ? n.publishedAt : "";
+    const built = buildItems(text, { publishedAt: base });
     items = Array.isArray(built) ? built : [];
   } catch (e) {
     items = [];

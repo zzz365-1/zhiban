@@ -16,6 +16,8 @@ export default function NewNoticeDialog({
   parsing,
   onParse,
   onClose,
+  publishedAt,
+  onPublishedAtChange,
 }) {
   const isMulti = mode === "multi";
 
@@ -87,6 +89,29 @@ export default function NewNoticeDialog({
       <p className="mt-2.5 text-[12px] leading-relaxed text-[#64748B]">
         {hint}
       </p>
+
+      {/* 通知发布日期（选填）：只作换算基准，留空则保持待确认 */}
+      <div className="mt-3">
+        <label
+          htmlFor="notice-publish-date"
+          className="block text-[13px] font-medium text-[#0F172A]"
+        >
+          通知发布日期
+          <span className="ml-1 font-normal text-[#94A3B8]">（选填）</span>
+        </label>
+        <input
+          id="notice-publish-date"
+          type="date"
+          value={publishedAt || ""}
+          onChange={(e) => {
+            if (onPublishedAtChange) onPublishedAtChange(e.target.value);
+          }}
+          className="zb-input mt-2 w-full"
+        />
+        <p className="mt-1.5 text-[12px] leading-relaxed text-[#64748B]">
+          原文里有「下周三」「明天」这种说法时，填上发布日期才能换算成具体日期；留空就保持待确认。
+        </p>
+      </div>
 
       {/* 文本输入 */}
       <textarea

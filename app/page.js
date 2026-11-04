@@ -130,6 +130,8 @@ export default function Home() {
   const [categoryFilter, setCategoryFilter] = useState("全部");
   const [showShare, setShowShare] = useState(false);
   const [inputMode, setInputMode] = useState("single");
+  // 通知发布日期：只当换算基准用。空串表示没填，绝不能拿今天顶上去。
+  const [publishedAt, setPublishedAt] = useState("");
   const [warningCandidate, setWarningCandidate] = useState(null);
   const [warningDismissed, setWarningDismissed] = useState(false);
   // 多通知的切分确认弹窗与解析结果。
@@ -374,10 +376,12 @@ export default function Home() {
     }
 
     setParsing(true);
-    const result = await parseOne(text);
+    // 统一传入对象，字段名 publishedAt；没填就传空串，由下游判断“没有基准”
+    const baseOpts = { publishedAt: publishedAt || "" };
+    const result = await parseOne(text, baseOpts);
     const withItems = {
       ...result.analysis,
-      items: buildItems(text),
+      items: buildItems(text, baseOpts),
     };
     setAnalysis(withItems);
     setDirty(false);
@@ -413,7 +417,8 @@ export default function Home() {
         continue;
       }
       try {
-        const r = await parseOne(t);
+        // 每条都用同一个基准，循环里只读不写
+        const r = await parseOne(t, { publishedAt: publishedAt || "" });
         const src = r.analysis._source;
         results.push({
           text: t,
@@ -441,10 +446,11 @@ export default function Home() {
     setInputMode("single");
     setParsing(true);
     const singleText = noticeText.trim();
-    const result = await parseOne(singleText);
+    const baseOpts = { publishedAt: publishedAt || "" };
+    const result = await parseOne(singleText, baseOpts);
     const withItems = {
       ...result.analysis,
-      items: buildItems(singleText),
+      items: buildItems(singleText, baseOpts),
     };
     setAnalysis(withItems);
     setDirty(false);
@@ -480,7 +486,11 @@ export default function Home() {
       source: sourceLabel(analysis._source),
       text: noticeText,
       analysis,
-      items: analysis.items || buildItems(noticeText),
+      items:
+        analysis.items ||
+        buildItems(noticeText, { publishedAt: publishedAt || "" }),
+      // 存下当时的发布日期，老通知补事项时按它换算，空串就是没填
+      publishedAt: publishedAt || "",
       deadlineDate: deadlineDate ? deadlineDate.getTime() : null,
       savedAt: Date.now(),
     };
@@ -655,6 +665,8 @@ export default function Home() {
           source: sourceLabel(item.analysis._source),
           text: item.text,
           analysis: item.analysis,
+          // 批量的每条都用同一个基准，存下来供日后补事项
+          publishedAt: publishedAt || "",
           deadlineDate: deadlineDate ? deadlineDate.getTime() : null,
           savedAt: Date.now(),
         };
@@ -1195,6 +1207,8 @@ export default function Home() {
         parsing={parsing}
         onParse={handleParse}
         onClose={handleCloseNew}
+        publishedAt={publishedAt}
+        onPublishedAtChange={setPublishedAt}
       />
     </div>
   );
