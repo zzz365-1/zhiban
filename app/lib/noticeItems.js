@@ -26,6 +26,26 @@ export function statusLabel(s) {
   return v == null ? "" : v;
 }
 
+// ---------- 通知的主要时间类型 ----------
+//
+// 一条通知的时间该按「截止」还是「开始」来说，取决于它拆出来的事项。
+// 判定口径：
+// - 有任意一条 timeType === "deadline" → "deadline"（报名交表这类，还是要赶截止）
+// - 一条 deadline 都没有，但有 timeType === "start" → "start"（讲座这类，是去参加）
+// - 没有 items 数组或数组为空的老数据 → "deadline"（保持旧说法）
+export function getNoticeTimeType(analysis) {
+  const items =
+    analysis && Array.isArray(analysis.items) ? analysis.items : [];
+  if (items.length === 0) return "deadline";
+  let hasStart = false;
+  for (let i = 0; i < items.length; i++) {
+    const t = items[i] && items[i].timeType;
+    if (t === "deadline") return "deadline";
+    if (t === "start") hasStart = true;
+  }
+  return hasStart ? "start" : "deadline";
+}
+
 // ---------- 切句 ----------
 
 // 断句字符类：句号、分号、感叹号、问号、换行。逗号顿号不算断句。
@@ -380,6 +400,120 @@ function buildSuggestions(isSubmit, materials) {
   return out;
 }
 
+// ---------- 通用动作词表 ----------
+// 手续类没有材料时，按原文实际让做的动作起名，不再一律叫提交材料。
+// 长动作在前，保证同一位置命中更长的那个。
+const ACTION_WORDS = [
+  "完成", "核对", "核实", "登录", "提交", "报送", "上交", "递交",
+  "缴纳", "缴费", "填写", "办理", "领取", "归还", "报名", "参加", "出席",
+  "到场", "签到", "确认", "复核", "核验", "上传", "申报", "登记", "采集",
+  "自查", "整改", "排查", "补办", "补测", "补考",
+];
+
+// 时间状语：于/在 到 前/之前/以前 为止，含可选日期时间内容，整段去掉。
+// 一律字符类，不用反斜杠加数字。
+// 结尾必须真的落在 前/之前/以前/以内/内 上；中间只放行日期时间会用的字，
+// 碰到 完成/核对 这类动作字就停，不能把动作一起吃掉。
+// 一律字符类，不用反斜杠加数字。
+const TIME_ADVERBIAL_RE = new RegExp(
+  "(于|在)[0-9一二三四五六七八九十两" + SPACE_CLASS + "月日号点时分上下午晚早中" +
+    "：:，,至到~～\-]*?(之前|以前|以内|前|内)"
+);
+
+// 呼语前缀：请某某同学、各班等。
+const VOCATIVE_RE = new RegExp(
+  "^(请|烦请|望|希望)[各班各系各院各寝室全体学生同学老师们组长成员]{0,20}[，,：:]?"
+);
+
+// 名称最大长度，保守截断，别把整句塞进去。
+const NAME_MAX_LEN = 24;
+
+function hasActionWord(text) {
+  for (let i = 0; i < ACTION_WORDS.length; i++) {
+    if (text.indexOf(ACTION_WORDS[i]) !== -1) return true;
+  }
+  return false;
+}
+
+// 从一小句里按动作词表起名。
+// 规则：去掉句尾标点、去掉时间状语、去掉呼语；找最后一个动作动词，
+// 从它起截到小句末；若紧邻前面还有动作动词则起点前移（到场签到保留到场）。
+// 找不到动作词返回 null，由调用方给带待确认的谨慎名字。
+function deriveActionName(sentenceText) {
+  const s = sentenceText == null ? "" : String(sentenceText);
+  if (!s) return null;
+
+  // 按逗号取小句，取最后一小句里动作最靠后的那一段
+  const clauses = s.split(new RegExp("[，,]"));
+  let candidate = "";
+  for (let ci = clauses.length - 1; ci >= 0; ci--) {
+    let c = String(clauses[ci] || "").trim();
+    if (!c) continue;
+
+    // 句尾标点
+    c = c.replace(new RegExp(SENTENCE_BREAK + "+$"), "").trim();
+    // 时间状语整段去掉
+    c = c.replace(TIME_ADVERBIAL_RE, "").trim();
+    // 呼语前缀
+    c = c.replace(VOCATIVE_RE, "").trim();
+    // 去掉残留的于/在开头的孤立状语和“某某日前”尾巴
+    c = c.replace(new RegExp("^(于|在)"), "").trim();
+
+    if (hasActionWord(c)) {
+      candidate = c;
+      break;
+    }
+  }
+  if (!candidate) return null;
+
+  // 找最后一个动作动词的位置，长词优先
+  let lastIdx = -1;
+  let lastLen = 0;
+  for (let i = 0; i < ACTION_WORDS.length; i++) {
+    const w = ACTION_WORDS[i];
+    const idx = candidate.lastIndexOf(w);
+    if (idx === -1) continue;
+    // 更靠后优先；同位置取更长的
+    if (idx > lastIdx || (idx === lastIdx && w.length > lastLen)) {
+      lastIdx = idx;
+      lastLen = w.length;
+    }
+  }
+  if (lastIdx === -1) return null;
+
+  // 紧邻前面还有动作词就往前移，不再比长度，并且能连着往前移
+  // （完成缴费保住完成，到场签到保住到场）
+  let start = lastIdx;
+  let moved = true;
+  while (moved && start > 0) {
+    moved = false;
+    for (let i = 0; i < ACTION_WORDS.length; i++) {
+      const w = ACTION_WORDS[i];
+      if (start >= w.length &&
+          candidate.slice(start - w.length, start) === w) {
+        start = start - w.length;
+        moved = true;
+        break;
+      }
+    }
+  }
+  // 前一字紧挨着另一个动作词尾部的情况，如“签到”前“到场”留
+  const head = candidate.slice(start);
+  // 名称从动作词起截到小句末
+  let name = head;
+  // 去掉名尾动作后的语气词尾巴“逾期不再受理”这类不在同一小句，已按逗号切掉，
+  // 仍兜一层：遇到“逾期”“不再受理”从那里截断
+  const cutAt = name.indexOf("逾期");
+  if (cutAt > 0) name = name.slice(0, cutAt);
+  if (name.length > NAME_MAX_LEN) name = name.slice(0, NAME_MAX_LEN);
+  name = name.replace(new RegExp(SENTENCE_BREAK + "+$"), "").trim();
+  if (!name) return null;
+  if (!hasActionWord(name)) return null;
+  // 只剩一两个字太泛（如“办理”），按判断不出处理，交给调用方给待确认名字
+  const bare = name.replace(new RegExp("[" + SPACE_CLASS + "]+", "g"), "");
+  if (bare.length <= 2) return null;
+  return name;
+}
 function buildName(isSubmit, materials, sentenceText, kind) {
   const text = sentenceText == null ? "" : String(sentenceText);
 
@@ -388,9 +522,13 @@ function buildName(isSubmit, materials, sentenceText, kind) {
     if (Array.isArray(materials) && materials.length > 0) {
       return "提交" + materials[0];
     }
+    // 无材料：按原文实际让做的动作起名，不再一律“提交材料”
+    const actionName = deriveActionName(text);
+    if (actionName) return actionName;
+    // 报名表是明确的提交动作，保留
     if (text.indexOf("报名") !== -1) return "提交报名表";
-    if (text.indexOf("领取") !== -1) return "领取材料";
-    return "提交材料";
+    // 实在判断不出动作：谨慎名字，带待确认
+    return "待确认办理事项";
   }
 
   // 活动类
@@ -401,6 +539,9 @@ function buildName(isSubmit, materials, sentenceText, kind) {
     }
     return "参加" + noun;
   }
+  // 没有活动名词：先试按原文动作起名（到场签到 / 参加比赛 这类）
+  const actionName = deriveActionName(text);
+  if (actionName) return actionName;
   if (text.indexOf("配合") !== -1 || text.indexOf("接受") !== -1) {
     return "配合活动";
   }

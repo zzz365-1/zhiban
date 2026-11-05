@@ -6,7 +6,7 @@
  * 数据同源，改日期/办理状态两边才对得上。
  */
 
-import { buildDeadlineDate } from "./deadline.js";
+import { buildDeadlineDate, hasExplicitTime, NO_TIME_NOTE } from "./deadline.js";
 
 /**
  * 把一批通知摊平成一串日历事件。每个事件对应一个事项。
@@ -35,16 +35,20 @@ export function buildRouteEvents(notices) {
       // 老数据：整条通知自己的截止时间 + 标题
       if (!n.deadlineDate) continue;
       const d = new Date(n.deadlineDate);
+      const hasTime = hasExplicitTime(n.analysis && n.analysis.time);
       events.push({
         noticeId: n.id,
         noticeTitle: n.title || "",
         itemIndex: 0,
         name: n.title || "",
         date: d,
-        time:
-          String(d.getHours()).padStart(2, "0") +
-          ":" +
-          String(d.getMinutes()).padStart(2, "0"),
+        time: hasTime
+          ? String(d.getHours()).padStart(2, "0") +
+            ":" +
+            String(d.getMinutes()).padStart(2, "0")
+          : "",
+        hasExplicitTime: hasTime,
+        timeNote: hasTime ? "" : NO_TIME_NOTE,
         endTime: "",
         ts: n.deadlineDate,
         location: (n.analysis && n.analysis.location) || "",
@@ -64,16 +68,20 @@ export function buildRouteEvents(notices) {
       if (ts === null) return; // 算不出来，跳过，不硬塞
 
       const tsNum = ts.getTime();
+      const hasTime = hasExplicitTime(item && item.time);
       events.push({
         noticeId: n.id,
         noticeTitle: n.title || "",
         itemIndex: index,
         name: item.name || "",
         date: ts,
-        time:
-          String(ts.getHours()).padStart(2, "0") +
-          ":" +
-          String(ts.getMinutes()).padStart(2, "0"),
+        time: hasTime
+          ? String(ts.getHours()).padStart(2, "0") +
+            ":" +
+            String(ts.getMinutes()).padStart(2, "0")
+          : "",
+        hasExplicitTime: hasTime,
+        timeNote: hasTime ? "" : NO_TIME_NOTE,
         endTime: (item && item.endTime) || "",
         ts: tsNum,
         location: item.location || "",

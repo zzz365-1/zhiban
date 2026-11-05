@@ -2,6 +2,22 @@ const RE_YMD = new RegExp("^([0-9]{4})[ ]*[-/年.][ ]*([0-9]{1,2})[ ]*[-/月.][ 
 const RE_MD = new RegExp("^([0-9]{1,2})[ ]*(?:月|[/-])[ ]*([0-9]{1,2})");
 const RE_HM = new RegExp("^([0-9]{1,2}):([0-9]{2})$");
 
+// 判断原始时间字符串是否是「合法时分写法」。
+// 只看原始输入，不从算出来的 Date 倒推——时间戳分不出原文有没有写时刻。
+// 空串、null、别的乱写一律算没有明确时刻。
+export function hasExplicitTime(time) {
+  const s = String(time == null ? "" : time).trim();
+  if (!s) return false;
+  const m = s.match(RE_HM);
+  if (!m) return false;
+  const h = parseInt(m[1], 10);
+  const mi = parseInt(m[2], 10);
+  return h >= 0 && h <= 23 && mi >= 0 && mi <= 59;
+}
+
+// 无明确时刻的统一说明文字，页面各处以同一句为准。
+export const NO_TIME_NOTE = "具体时刻未说明";
+
 // 用户手输日期的严格解析：整串必须完全匹配，不允许尾巴带别的字
 const RE_INPUT_YMD = new RegExp(
   "^([0-9]{4})[ ]*[-/年.][ ]*([0-9]{1,2})[ ]*[-/月.][ ]*([0-9]{1,2})[ ]*[日号]?$"
@@ -87,14 +103,14 @@ export function buildDeadlineDate(deadline, time) {
     }
   }
 
-  let hours = 17;
+  // 没有明确时刻时，排序基准就落在当天零点，绝不跨天。
+  // 这只是一个排序用的基准点，不代表通知要求的时刻。
+  let hours = 0;
   let minutes = 0;
-  if (time) {
+  if (hasExplicitTime(time)) {
     const tm = time.match(RE_HM);
-    if (tm) {
-      hours = parseInt(tm[1], 10);
-      minutes = parseInt(tm[2], 10);
-    }
+    hours = parseInt(tm[1], 10);
+    minutes = parseInt(tm[2], 10);
   }
 
   return new Date(year, month, day, hours, minutes, 0, 0);

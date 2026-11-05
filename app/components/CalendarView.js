@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { buildMonthGrid, formatDateKey } from "../lib/calendar";
 import { formatRemaining, formatTimeHM } from "../lib/todo";
+import { NO_TIME_NOTE } from "../lib/deadline.js";
 import { buildRouteEvents } from "../lib/routeEvents";
 
 const WEEKDAY_LABELS = ["日", "一", "二", "三", "四", "五", "六"];
@@ -182,7 +183,11 @@ export default function CalendarView({ notices, now }) {
                       {ev.progress}
                     </span>
                   </div>
-                  <p className="mt-1 text-xs text-slate-500">{ev.time}</p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {ev.hasExplicitTime === false
+                      ? ev.timeNote || NO_TIME_NOTE
+                      : ev.time}
+                  </p>
                   {ev.location && (
                     <p className="mt-0.5 text-xs text-slate-500">
                       地点：{ev.location}

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { buildMonthGrid, formatDateKey } from "../lib/calendar.js";
 import { buildRouteEvents } from "../lib/routeEvents.js";
 import { formatRemaining } from "../lib/todo.js";
+import { NO_TIME_NOTE } from "../lib/deadline.js";
 import { StatusPill, EmptyState } from "./ui/ZbUI.js";
 import ScheduleAlerts from "./ScheduleAlerts.js";
 import {
@@ -368,7 +369,13 @@ export default function CalendarPage({
                           size={14}
                           className="flex-none text-slate-400"
                         />
-                        <span className="truncate">{ev.time}</span>
+                        {ev.hasExplicitTime === false ? (
+                          <span className="truncate text-slate-400">
+                            {ev.timeNote || NO_TIME_NOTE}
+                          </span>
+                        ) : (
+                          <span className="truncate">{ev.time}</span>
+                        )}
                       </p>
                       {ev.location && (
                         <p className="flex items-center gap-1.5">

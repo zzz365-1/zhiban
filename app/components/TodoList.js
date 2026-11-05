@@ -38,7 +38,11 @@ export default function TodoList({ items, now }) {
         <>
           <ul className="flex-1 overflow-y-auto">
             {(expanded ? items : items.slice(0, COLLAPSED_COUNT)).map((item) => {
-              const remaining = formatRemaining(item.ts, now);
+              const remaining = formatRemaining(
+                item.ts,
+                now,
+                item.hasExplicitTime === false
+              );
               return (
                 <li
                   key={item.noticeId + "-" + item.itemIndex}

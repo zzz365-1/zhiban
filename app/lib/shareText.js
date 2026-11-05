@@ -4,6 +4,7 @@
  */
 
 import { getCalendarDayDiff } from "./todo.js";
+import { hasExplicitTime, NO_TIME_NOTE } from "./deadline.js";
 
 const LF = String.fromCharCode(10);
 
@@ -24,10 +25,13 @@ export function getNoticeTitle(notice) {
   return "未命名通知";
 }
 
-export function formatShareDateTime(ts) {
+export function formatShareDateTime(ts, time) {
   const d = new Date(ts);
   const mo = d.getMonth() + 1;
   const day = d.getDate();
+  if (!hasExplicitTime(time)) {
+    return mo + "月" + day + "日（" + NO_TIME_NOTE + "）";
+  }
   const hh = String(d.getHours()).padStart(2, "0");
   const mm = String(d.getMinutes()).padStart(2, "0");
   return mo + "月" + day + "日 " + hh + ":" + mm;
@@ -76,7 +80,10 @@ export function buildShareText(notices, nowTs, rangeDays) {
 
   for (const n of items) {
     const title = getNoticeTitle(n);
-    const stamp = formatShareDateTime(n.deadlineDate);
+    const stamp = formatShareDateTime(
+      n.deadlineDate,
+      n.analysis ? n.analysis.time : null
+    );
     let line = stamp + " - " + title;
 
     const extras = [];

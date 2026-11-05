@@ -21,14 +21,17 @@ export function getCalendarDayDiff(deadlineTs, nowTs) {
  *   ≥ 24 小时         → "剩 N 天"（按自然日）
  *      N ≤ 3 → red，N ≤ 7 → amber，其余 → blue
  */
-export function formatRemaining(deadlineTs, nowTs) {
+export function formatRemaining(deadlineTs, nowTs, dateOnly = false) {
   const diff = deadlineTs - nowTs;
   if (diff < 0) return { text: "已过期", level: "expired" };
-  if (diff < 3600000) return { text: "不到 1 小时", level: "red" };
-  if (diff < 86400000) {
-    // 向下取整：23 小时 50 分显示“剩 23 小时”，不会向上凑成 24
-    const hours = Math.floor(diff / 3600000);
-    return { text: "剩 " + hours + " 小时", level: "red" };
+  // dateOnly 可省略。显式传 true（原文没写具体时刻）时不算小时，一律按自然日说剩 N 天。
+  if (!dateOnly) {
+    if (diff < 3600000) return { text: "不到 1 小时", level: "red" };
+    if (diff < 86400000) {
+      // 向下取整：23 小时 50 分显示“剩 23 小时”，不会向上凑成 24
+      const hours = Math.floor(diff / 3600000);
+      return { text: "剩 " + hours + " 小时", level: "red" };
+    }
   }
   const days = getCalendarDayDiff(deadlineTs, nowTs);
   if (days <= 3) return { text: "剩 " + days + " 天", level: "red" };

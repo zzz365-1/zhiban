@@ -74,7 +74,47 @@ export function noticeTitle(text) {
   return "";
 }
 
-// 返回 { type, notice }；type: "exact" | "title_same" | "none"
+// 疑似重复阈值：归一化相邻两字 Dice 系数
+export const SIMILAR_THRESHOLD = 0.75;
+
+// 归一化后取相邻两字组成集合，Dice = 交集数*2 / (集合A大小+集合B大小)
+export function textSimilarity(a, b) {
+  const sa = normalizeForCompare(a);
+  const sb = normalizeForCompare(b);
+  if (!sa.length || !sb.length) return 0;
+  if (sa === sb) return 1;
+
+  const setA = {};
+  let sizeA = 0;
+  for (let i = 0; i + 1 < sa.length; i++) {
+    const g = sa.substring(i, i + 2);
+    if (!Object.prototype.hasOwnProperty.call(setA, g)) {
+      setA[g] = true;
+      sizeA++;
+    }
+  }
+
+  const setB = {};
+  let sizeB = 0;
+  for (let j = 0; j + 1 < sb.length; j++) {
+    const g = sb.substring(j, j + 2);
+    if (!Object.prototype.hasOwnProperty.call(setB, g)) {
+      setB[g] = true;
+      sizeB++;
+    }
+  }
+
+  if (!sizeA || !sizeB) return 0;
+
+  let inter = 0;
+  for (const g in setA) {
+    if (Object.prototype.hasOwnProperty.call(setB, g)) inter++;
+  }
+  return (inter * 2) / (sizeA + sizeB);
+}
+
+// 返回 { type, notice }；type: "exact" | "similar" | "title_same" | "none"
+// similar 时额外带 score
 export function checkDuplicate(text, notices) {
   const arr = Array.isArray(notices) ? notices : [];
   const normText = normalizeForCompare(text);
@@ -88,7 +128,23 @@ export function checkDuplicate(text, notices) {
     }
   }
 
-  // 2) 标题相同（标题取正文第一行）
+  // 2) 正文疑似重复：相似度 >= 阈值
+  let best = null;
+  let bestScore = -1;
+  for (let i = 0; i < arr.length; i++) {
+    const n = arr[i];
+    if (!n || typeof n !== "object") continue;
+    const s = textSimilarity(text, n.text);
+    if (s >= SIMILAR_THRESHOLD && s > bestScore) {
+      best = n;
+      bestScore = s;
+    }
+  }
+  if (best) {
+    return { type: "similar", notice: best, score: bestScore };
+  }
+
+  // 3) 标题相同（标题取正文第一行）
   const normTitle = normalizeForCompare(noticeTitle(text));
   if (normTitle) {
     for (let i = 0; i < arr.length; i++) {
@@ -101,6 +157,46 @@ export function checkDuplicate(text, notices) {
   }
 
   return { type: "none", notice: null };
+}
+
+// 批量判定：texts 与已有通知、同批次内排在前面且未命中已有通知的正文比较
+// 返回等长数组，每项 { type, notice, score, withinBatch }
+// 已有通知优先；命中同批次内正文时 withinBatch 为 true，notice 为前面那条正文的包装对象
+export function checkBatchDuplicates(texts, notices) {
+  const list = Array.isArray(texts) ? texts : [];
+  const arr = Array.isArray(notices) ? notices : [];
+  const earlierTexts = [];
+  const out = [];
+
+  for (let i = 0; i < list.length; i++) {
+    const text = list[i];
+    const hit = checkDuplicate(text, arr);
+
+    if (hit.type !== "none") {
+      out.push({
+        type: hit.type,
+        notice: hit.notice,
+        score: hit.type === "similar" ? hit.score : 1,
+        withinBatch: false,
+      });
+    } else {
+      const batchHit = checkDuplicate(text, earlierTexts);
+      if (batchHit.type !== "none") {
+        out.push({
+          type: batchHit.type,
+          notice: batchHit.notice,
+          score: batchHit.type === "similar" ? batchHit.score : 1,
+          withinBatch: true,
+        });
+      } else {
+        out.push({ type: "none", notice: null, score: 0, withinBatch: false });
+      }
+    }
+
+    earlierTexts.push({ text: text });
+  }
+
+  return out;
 }
 
 // 事项去重键：名称 + 日期 + 时间

@@ -42,9 +42,9 @@ const TONE_CLASS = {
 };
 
 const SECTIONS = [
-  { key: "pending", title: "待确认事项", empty: "没有需要确认的事项" },
   { key: "soon", title: "即将截止", empty: "未来三天没有要办的事" },
   { key: "todo", title: "待办理事项", empty: "暂时没有待办事项" },
+  { key: "pending", title: "待确认事项", empty: "没有需要确认的事项" },
 ];
 
 export default function WorkspaceOverview({
@@ -80,7 +80,7 @@ export default function WorkspaceOverview({
 
   if (allEmpty) {
     return (
-      <div className="mx-auto w-full max-w-6xl px-4 py-8">
+      <div className="mx-auto w-full max-w-6xl overflow-x-hidden px-4 py-8 sm:px-6">
         <div className="mb-6">
           <h1 className="text-[24px] font-bold leading-tight text-[#0F172A]">
             工作台
@@ -111,7 +111,7 @@ export default function WorkspaceOverview({
   }
 
   return (
-    <div className="mx-auto w-full max-w-6xl px-4 py-8">
+    <div className="mx-auto w-full max-w-6xl overflow-x-hidden px-4 py-8 sm:px-6">
       {/* 页头 */}
       <div className="mb-6">
         <h1 className="text-[24px] font-bold leading-tight text-[#0F172A]">
@@ -122,29 +122,8 @@ export default function WorkspaceOverview({
         </p>
       </div>
 
-      {/* 提醒区：alerts 为空时整块不渲染 */}
-      {Array.isArray(alerts) && alerts.length > 0 ? (
-        <div className="mb-6">
-          <SectionTitle>需要关注</SectionTitle>
-          <ScheduleAlerts
-            alerts={alerts}
-            onOpenItem={(noticeId, itemIndex) => {
-              if (!onOpenItem) return;
-              const all = pending.concat(soon).concat(todo);
-              const ev = all.find(
-                (e) =>
-                  String(e.noticeId) === String(noticeId) &&
-                  String(e.itemIndex) === String(itemIndex)
-              );
-              if (ev) onOpenItem(ev);
-            }}
-            onFillEndTime={onFillEndTime}
-          />
-        </div>
-      ) : null}
-
       {/* 统计卡 */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 sm:gap-5">
         {STAT_CARDS.map(({ key, label, Icon, tone }) => {
           const count = Number(safeStats[key]) || 0;
           const numClass = TONE_CLASS[tone] || TONE_CLASS.blue;
@@ -176,6 +155,27 @@ export default function WorkspaceOverview({
         })}
       </div>
 
+      {/* 提醒区：alerts 为空时整块不渲染 */}
+      {Array.isArray(alerts) && alerts.length > 0 ? (
+        <div className="mb-6">
+          <SectionTitle>需要关注</SectionTitle>
+          <ScheduleAlerts
+            alerts={alerts}
+            onOpenItem={(noticeId, itemIndex) => {
+              if (!onOpenItem) return;
+              const all = pending.concat(soon).concat(todo);
+              const ev = all.find(
+                (e) =>
+                  String(e.noticeId) === String(noticeId) &&
+                  String(e.itemIndex) === String(itemIndex)
+              );
+              if (ev) onOpenItem(ev);
+            }}
+            onFillEndTime={onFillEndTime}
+          />
+        </div>
+      ) : null}
+
       {/* 三个区块 */}
       {SECTIONS.map(({ key, title, empty }) => {
         const list = groupMap[key] || [];
@@ -195,7 +195,7 @@ export default function WorkspaceOverview({
                 <EmptyState title={empty} />
               </div>
             ) : (
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 md:gap-5 xl:grid-cols-3">
                 {list.map((event) => {
                   const k = itemKey(event);
                   return (

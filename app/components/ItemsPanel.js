@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { statusLabel } from "../lib/noticeItems.js";
+import { NO_TIME_NOTE } from "../lib/deadline.js";
 
 const PROGRESS_OPTIONS = [
   { value: "待办理", label: "待办理" },
@@ -183,10 +184,18 @@ function TimeHeadline({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
 
+  // 只有同学自己补的结束时间才单独标出来；通知原文写了 endTime 的不带这个来源，不显示
+  const userEndTime =
+    item.endTimeSource === "user" && item.endTime ? item.endTime : "";
+
   const parts = [];
   if (item.timeTypeLabel) parts.push(item.timeTypeLabel);
   if (item.date) parts.push(item.date);
   if (item.time) parts.push(item.time);
+  // 日期有了、时刻原文没写：补一句说明，不显示成空白也不像漏抽
+  if (!item.time && item.date) parts.push(NO_TIME_NOTE);
+  // 通知规定的开始时间和自行补充的结束时间之间加强分隔，别混成一句
+  if (userEndTime) parts.push("至");
 
   const span =
     (fields.date && typeof fields.date.start === "number" && fields.date) ||
@@ -284,6 +293,11 @@ function TimeHeadline({
       >
         {text}
       </span>
+      {userEndTime && (
+        <span className="ml-1 rounded bg-slate-100 px-1 py-0.5 text-[10px] font-normal text-slate-500">
+          自行补充 {userEndTime}
+        </span>
+      )}
       <StatusTag status={tagStatus} />
       {onEditField && (
         <button

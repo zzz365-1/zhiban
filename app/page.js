@@ -21,14 +21,14 @@ import { buildRouteEvents } from "./lib/routeEvents.js";
 import { buildScheduleAlerts } from "./lib/conflict.js";
 import { updateNoticeAnalysis } from "./lib/noticeOps.js";
 import { parseOne } from "./lib/parseOne.js";
-import { isDuplicate, splitNotices } from "./lib/splitNotices.js";
+import { splitNotices } from "./lib/splitNotices.js";
 import { checkModeMismatch } from "./lib/modeGuard.js";
 import { buildSampleNotices } from "./lib/sampleNotices.js";
 import ItemsPanel from "./components/ItemsPanel";
 import DuplicateDialog from "./components/DuplicateDialog";
 import { buildItems } from "./lib/noticeItems.js";
 import { migrateNotice } from "./lib/noticeMigrate.js";
-import { checkDuplicate } from "./lib/dedupe.js";
+import { checkBatchDuplicates, checkDuplicate } from "./lib/dedupe.js";
 import PatchLinkDialog from "./components/PatchLinkDialog";
 import PatchReviewDialog from "./components/PatchReviewDialog";
 import {
@@ -352,7 +352,11 @@ export default function Home() {
     }
   }
 
-  async function handleParse() {
+  async function handleParse(opts) {
+    // 这个函数也当按钮回调用，React 可能把事件对象传进来；
+    // 只认我们自己塞的 { forceImport: true }，别的都当作没有放行。
+    const forceImport =
+      opts && opts.forceImport === true ? true : false;
     const text = noticeText.trim();
     if (!text) {
       alert("请先粘贴或输入通知原文，再点击解析。");
@@ -377,7 +381,7 @@ export default function Home() {
     }
 
     // 单条模式先查重：命中就弹窗，别直接开跑
-    if (inputMode !== "multi" && !allowDuplicate) {
+    if (inputMode !== "multi" && !allowDuplicate && !forceImport) {
       const dup = checkDuplicate(text, notices);
       if (dup && dup.type !== "none") {
         setShowNew(false);
@@ -427,10 +431,12 @@ export default function Home() {
   }
 
   function handleDuplicateImport() {
-    // 放行状态一直保留到保存完成，避免保存时二次查重
+    // 放行状态一直保留到保存完成，避免保存时二次查重。
+    // state 更新是异步的，本次渲染里 allowDuplicate 还是 false，
+    // 所以这次解析直接用 forceImport 同步放行，不走 state 判断。
     setAllowDuplicate(true);
     setDuplicate(null);
-    handleParse();
+    handleParse({ forceImport: true });
   }
 
   function handleDuplicateCancel() {
@@ -441,11 +447,13 @@ export default function Home() {
     setSplitDialog({ open: false, items: [], reason: "" });
     setParsing(true);
     const results = [];
-    for (const t of kept) {
-      if (isDuplicate(t, notices)) {
-        results.push({ text: t, status: "duplicate", analysis: null, errorMsg: "" });
-        continue;
-      }
+    // 先一次性拿到每条跟已有通知、跟同批次前文的判定，顺序与 kept 一致。
+    // 批内命中的 notice 只是 { text } 包装对象，没有 id/title，后面展示要当心。
+    const batchDup = checkBatchDuplicates(kept, notices);
+    for (let i = 0; i < kept.length; i++) {
+      const t = kept[i];
+      const dup = batchDup[i] || { type: "none", notice: null, score: 0, withinBatch: false };
+      const isDupHit = dup.type !== "none";
       try {
         // 每条都用同一个基准，循环里只读不写
         const baseOpts = { publishedAt: publishedAt || "" };
@@ -458,9 +466,14 @@ export default function Home() {
         };
         results.push({
           text: t,
+          // 解析结果一律留住，命中重复只靠 skip 控制存不存
           status: src === "rule_fallback" ? "fallback" : "success",
           analysis: withItems,
           errorMsg: r.error ? String(r.error.message || r.error.code || "") : "",
+          dupInfo: dup,
+          // 命中重复默认跳过；用户点「明确另存」才翻成 false
+          skip: isDupHit,
+          keep: false,
         });
       } catch (e) {
         results.push({
@@ -468,6 +481,9 @@ export default function Home() {
           status: "error",
           analysis: null,
           errorMsg: String(e?.message || e),
+          dupInfo: dup,
+          skip: isDupHit,
+          keep: false,
         });
       }
     }
@@ -479,6 +495,22 @@ export default function Home() {
     setParsing(false);
     setShowNew(false);
     setView("notices");
+  }
+
+  // 批量结果面板上的「跳过本条 / 明确另存」切换。
+  // skip 为真表示跳过，为假表示明确另存（放行）。
+  function handleToggleBatchSkip(index, skip) {
+    setBatchResults((prev) =>
+      prev.map((it, i) => {
+        if (i !== index) return it;
+        return {
+          ...it,
+          skip: Boolean(skip),
+          // 明确另存就记 keep，保存时二次查重放行
+          keep: !skip,
+        };
+      })
+    );
   }
 
   async function handleParseAsSingle() {
@@ -498,8 +530,7 @@ export default function Home() {
   }
 
   const batchSavable = batchResults.filter(
-    (it) =>
-      (it.status === "success" || it.status === "fallback") && it.analysis
+    (it) => it.skip !== true && it.analysis
   ).length;
 
   function handleSave() {
@@ -508,12 +539,12 @@ export default function Home() {
     if (inputMode === "multi") {
       handleBatchSave(
         batchResults
-          .filter(
-            (it) =>
-              (it.status === "success" || it.status === "fallback") &&
-              it.analysis
-          )
-          .map((it) => ({ text: it.text, analysis: it.analysis }))
+          .filter((it) => it.skip !== true && it.analysis)
+          .map((it) => ({
+            text: it.text,
+            analysis: it.analysis,
+            keep: it.keep === true,
+          }))
       );
       setBatchResults([]);
       return;
@@ -694,7 +725,13 @@ export default function Home() {
       let seed = 0;
 
       for (const item of items) {
-        if (isDuplicate(item.text, seen)) continue;
+        // 解析失败或没留下结果的那条直接跳过，别让一条坏数据带崩整批
+        if (!item || !item.analysis) continue;
+        // 用户明确另存的放行；其余用新查重再挡一次（只挡完全相同的正文）
+        if (!item.keep) {
+          const again = checkDuplicate(item.text, seen);
+          if (again && again.type === "exact") continue;
+        }
         const deadlineDate = buildDeadlineDate(
           item.analysis.deadline,
           item.analysis.time
@@ -816,6 +853,9 @@ export default function Home() {
         const next = {
           ...target,
           endTime: value,
+          // 记下来源：这是同学自己估的，通知原文没写。
+          // 走的就是这个入口，所以能到这儿就是 user，不用再判断。
+          endTimeSource: value ? "user" : null,
           status: {
             ...(target.status || {}),
             endTime: value ? "ok" : "not_mentioned",
@@ -1080,6 +1120,7 @@ export default function Home() {
                     <MultiResultPanel
                       items={batchResults}
                       onSave={handleSave}
+                      onSkip={handleToggleBatchSkip}
                       canSave={!dirty && batchSavable > 0 && !parsing}
                       saveLabel={
                         parsing

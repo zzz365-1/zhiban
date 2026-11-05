@@ -52,47 +52,34 @@ function alertKey(alert) {
     : alert.type + "|" + (alert.items || []).map(itemKey).join(",");
 }
 
+function itemDraftKey(item) {
+  return "endTime|" + itemKey(item);
+}
+
 export default function ScheduleAlerts({
   alerts,
   onOpenItem,
   onFillEndTime,
   className = "",
 }) {
-  // 展开的提醒 key 集合，每条提醒自己管自己
-  const [expanded, setExpanded] = useState(() => new Set());
   // 每条提醒输入框里的值，默认为空字符串，不预填任何猜的时间
   const [draft, setDraft] = useState({});
+  // 缺结束时间聚合卡：单独一个展开开关
+  const [endTimeOpen, setEndTimeOpen] = useState(false);
 
   if (!Array.isArray(alerts) || alerts.length === 0) return null;
 
   const canFillEndTime = typeof onFillEndTime === "function";
 
-  function toggleExpand(key) {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  }
-
   function updateDraft(key, value) {
     setDraft((prev) => (Object.assign({}, prev, { [key]: value })));
   }
 
-  function handleConfirm(alert, key) {
+  function handleConfirm(key, target) {
     const value = draft[key] || "";
-    if (!value) return;
-    const items = Array.isArray(alert.items) ? alert.items : [];
-    const target = items[0];
-    if (!target) return;
+    if (!value || !target) return;
     onFillEndTime(target.noticeId, target.itemIndex, value);
-    // 收起并清空
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      next.delete(key);
-      return next;
-    });
+    // 补完清空这一项的输入值
     setDraft((prev) => {
       const next = Object.assign({}, prev);
       delete next[key];
@@ -100,20 +87,33 @@ export default function ScheduleAlerts({
     });
   }
 
+  // 把 needEndTime 提醒聚合成一张卡，事项按 noticeId+itemIndex 去重
+  const endTimeAlerts = alerts.filter((a) => a && a.type === "needEndTime");
+  const seen = new Set();
+  const pendingItems = [];
+  endTimeAlerts.forEach((a) => {
+    const list = Array.isArray(a.items) ? a.items : [];
+    list.forEach((item) => {
+      if (!item) return;
+      const k = itemKey(item);
+      if (seen.has(k)) return;
+      seen.add(k);
+      pendingItems.push(item);
+    });
+  });
+  const showEndTimeCard = pendingItems.length > 0;
+
   return (
     <ul
       className={["zb-enter flex flex-col gap-3", className]
         .filter(Boolean)
         .join(" ")}
     >
-      {alerts.map((alert) => {
+      {alerts.filter((alert) => alert && alert.type !== "needEndTime").map((alert) => {
         const conf = TYPE_CONF[alert.type] || TYPE_CONF.needEndTime;
         const Icon = conf.Icon;
         const key = alertKey(alert);
         const items = Array.isArray(alert.items) ? alert.items : [];
-        const isExpanded = expanded.has(key);
-        const showFillEntry =
-          alert.type === "needEndTime" && canFillEndTime && items.length > 0;
 
         return (
           <li
@@ -172,47 +172,83 @@ export default function ScheduleAlerts({
               </div>
             ) : null}
 
-            {/* needEndTime 底部补充入口 */}
-            {showFillEntry ? (
-              <div className="mt-2.5">
-                {!isExpanded ? (
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => toggleExpand(key)}
-                  >
-                    补充结束时间
-                  </Button>
-                ) : (
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="time"
-                      value={draft[key] || ""}
-                      onChange={(e) => updateDraft(key, e.target.value)}
-                      className="h-8 rounded-[8px] border border-[#E2E8F0] bg-white px-2 text-[13px] text-[#0F172A] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/45"
-                    />
-                    <Button
-                      variant="primary"
-                      size="sm"
-                      disabled={!draft[key]}
-                      onClick={() => handleConfirm(alert, key)}
-                    >
-                      确定
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => toggleExpand(key)}
-                    >
-                      取消
-                    </Button>
-                  </div>
-                )}
-              </div>
-            ) : null}
           </li>
         );
-      })}
+        })}
+
+      {showEndTimeCard ? (
+        <li className="rounded-[12px] border border-blue-200 bg-blue-50/50 p-3">
+          <div className="flex items-center gap-2">
+            <IconClock size={16} className="flex-none text-blue-800" />
+            <span className="min-w-0 flex-1 text-[14px] font-semibold text-blue-800">
+              结束时间待补充
+            </span>
+            <Chip tone="brand" className="flex-none">
+              结束时间待补充
+            </Chip>
+          </div>
+          <p className="mt-1.5 text-[13px] leading-relaxed text-[#64748B]">
+            有{pendingItems.length}项活动未提供结束时间，暂无法判断时间冲突。
+          </p>
+          <div className="mt-2">
+            {!endTimeOpen ? (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setEndTimeOpen(true)}
+              >
+                查看具体事项
+              </Button>
+            ) : (
+              <div className="flex flex-col gap-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setEndTimeOpen(false)}
+                >
+                  收起
+                </Button>
+                {pendingItems.map((item) => {
+                  const ik = itemDraftKey(item);
+                  const label = item.name || "（未命名事项）";
+                  return (
+                    <div key={ik} className="flex flex-wrap items-center gap-2">
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => {
+                          if (onOpenItem)
+                            onOpenItem(item.noticeId, item.itemIndex);
+                        }}
+                      >
+                        {label}
+                      </Button>
+                      {canFillEndTime ? (
+                        <>
+                          <input
+                            type="time"
+                            value={draft[ik] || ""}
+                            onChange={(e) => updateDraft(ik, e.target.value)}
+                            className="h-8 rounded-[8px] border border-[#E2E8F0] bg-white px-2 text-[13px] text-[#0F172A] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/45"
+                          />
+                          <Button
+                            variant="primary"
+                            size="sm"
+                            disabled={!draft[ik]}
+                            onClick={() => handleConfirm(ik, item)}
+                          >
+                            确定
+                          </Button>
+                        </>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </li>
+      ) : null}
     </ul>
   );
 }

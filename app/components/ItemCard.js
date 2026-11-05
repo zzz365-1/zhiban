@@ -1,6 +1,7 @@
 "use client";
 
 import { Card, Chip, StatusPill, Button } from "./ui/ZbUI.js";
+import { NO_TIME_NOTE } from "../lib/deadline.js";
 import {
   IconClock,
   IconPin,
@@ -15,6 +16,14 @@ const HOUR_MS = 3600000;
 
 function pad2(n) {
   return String(n).padStart(2, "0");
+}
+
+/**
+ * 只有日期、没有明确时刻时用的写法：不带时分。
+ */
+function formatDateOnly(ts) {
+  const d = new Date(ts);
+  return d.getMonth() + 1 + "月" + d.getDate() + "日";
 }
 
 function formatWhen(ts) {
@@ -39,10 +48,17 @@ function formatWhen(ts) {
  * 三天以内 → 剩 N 天 warn
  * 超过三天 → 剩 N 天 brand
  */
-function remainingLabel(ts, now) {
+function remainingLabel(ts, now, dateOnly = false) {
   const diff = ts - now;
   if (diff < 0) {
     return { text: "已过期", tone: "neutral" };
+  }
+  // 只有日期、不知道几点时，不按小时估算，退到按天说。
+  if (dateOnly) {
+    const days = Math.floor(diff / DAY_MS);
+    if (days < 1) return null;
+    const tone = days <= 3 ? "warn" : "brand";
+    return { text: "剩 " + days + " 天", tone };
   }
   if (diff < HOUR_MS) {
     return { text: "不到一小时", tone: "danger" };
@@ -76,15 +92,31 @@ export default function ItemCard({
 }) {
   if (!event) return null;
 
-  const { name, ts, location, materials, progress, timeType, noticeTitle } =
-    event;
+  const {
+    name,
+    ts,
+    location,
+    materials,
+    progress,
+    timeType,
+    noticeTitle,
+    hasExplicitTime,
+    timeNote,
+  } = event;
+
+  // 没有明确时刻（hasExplicitTime 明确为 false）时，只按日期显示。
+  // 老数据没有这个字段时当作有明确时刻，行为跟以前一致。
+  const explicitTime = hasExplicitTime !== false;
 
   const safeNow = typeof now === "number" ? now : Date.now();
   const safeTs = typeof ts === "number" ? ts : null;
 
   const isDone = progress === "已办理";
 
-  const remaining = safeTs !== null ? remainingLabel(safeTs, safeNow) : null;
+  const remaining =
+    safeTs !== null
+      ? remainingLabel(safeTs, safeNow, !explicitTime)
+      : null;
 
   const timeTypeChip =
     timeType === "start"
@@ -172,8 +204,13 @@ export default function ItemCard({
               <IconClock size={16} className="flex-none text-[#94A3B8]" />
               <span className="min-w-0 flex-1 truncate text-[13px] text-[#64748B]">
                 <span className="font-medium text-[#0F172A]">
-                  {formatWhen(safeTs)}
+                  {explicitTime ? formatWhen(safeTs) : formatDateOnly(safeTs)}
                 </span>
+                {!explicitTime ? (
+                  <span className="ml-1 text-[#94A3B8]">
+                    {timeNote || NO_TIME_NOTE}
+                  </span>
+                ) : null}
               </span>
               {remaining ? (
                 <Chip tone={remaining.tone} className="flex-none">

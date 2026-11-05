@@ -32,13 +32,16 @@ function eq(a, b) {
 }
 
 function makeNotice(id, deadlineDate, extra) {
+  const a = new Date(deadlineDate);
+  const hh = String(a.getHours()).padStart(2, "0");
+  const mm = String(a.getMinutes()).padStart(2, "0");
   return {
     id,
     title: "通知" + id,
     text: "通知" + id,
     analysis: {
       deadline: null,
-      time: null,
+      time: hh + ":" + mm,
       location: null,
       materials: [],
       audience: null,

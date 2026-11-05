@@ -21,6 +21,7 @@
     "test:round4": "node scripts/test-round4.mjs",
     "test:round5": "node scripts/test-round5.mjs",
     "test:round6": "node scripts/test-round6.mjs",
+    "test:round7": "node scripts/test-round7.mjs",
     "test:extract": "node scripts/test-extract.mjs",
     "test:location": "node scripts/test-location.mjs",
     "test:calendar": "node scripts/test-calendar.mjs",

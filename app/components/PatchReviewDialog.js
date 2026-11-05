@@ -23,6 +23,7 @@ export default function PatchReviewDialog({
   alerts,
   onConfirm,
   onCancel,
+  onFieldClick,
 }) {
   const rows = review?.rows || [];
   const untouched = review?.untouched || [];

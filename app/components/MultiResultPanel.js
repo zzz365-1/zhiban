@@ -1,5 +1,9 @@
 "use client";
 
+import { useState } from "react";
+import { getNoticeTimeType } from "../lib/noticeItems.js";
+import { NO_TIME_NOTE } from "../lib/deadline.js";
+
 /**
  * 多通知解析结果面板。
  *
@@ -45,8 +49,27 @@ function Row({ label, value }) {
   );
 }
 
-export default function MultiResultPanel({ items, onSave, canSave, saveLabel }) {
+const DUP_LABEL = {
+  exact: "完全重复",
+  similar: "疑似重复（正文高度相似）",
+  title_same: "标题相同，正文不同",
+};
+
+export default function MultiResultPanel({
+  items,
+  onSave,
+  onSkip,
+  canSave,
+  saveLabel,
+}) {
+  // 展开查重详情用的下标集合；同批次命中时没有 id，只能按下标记
+  const [openDup, setOpenDup] = useState({});
+
   if (!items || items.length === 0) return null;
+
+  function toggleDup(idx) {
+    setOpenDup((prev) => ({ ...prev, [idx]: !prev[idx] }));
+  }
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-white">
@@ -71,27 +94,63 @@ export default function MultiResultPanel({ items, onSave, canSave, saveLabel }) 
           const a = it.analysis || {};
           const when = [a.deadline, a.time].filter(Boolean).join(" ");
           const event = [a.eventDate, a.eventTime].filter(Boolean).join(" ");
+          // 讲座这类按开始处理的通知，日期在 deadline、时刻在 time。
+          // 活动时刻只有真写了才顶替 time，别把 deadline 里的日期丢了。
+          const timeType = getNoticeTimeType(a);
+          const startDate = a.deadline || a.eventDate;
+          const startTime = a.eventTime || a.time;
+          const eventText = event;
           return (
             <li key={idx} className="py-3">
               <div className="mb-1.5 flex items-center gap-2">
                 <span className="text-[11px] font-medium text-slate-400">
                   第 {idx + 1} 条
                 </span>
-                <span
-                  className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
-                    STATUS_CLASS[it.status] || STATUS_CLASS.pending
-                  }`}
-                >
-                  {STATUS_LABEL[it.status] || it.status}
-                </span>
+                {it.dupInfo && it.dupInfo.type !== "none" ? (
+                  <>
+                    <span className="rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
+                      {it.dupInfo.type === "exact"
+                        ? "已存在"
+                        : it.dupInfo.type === "similar"
+                        ? "疑似重复"
+                        : it.dupInfo.type === "title_same"
+                        ? "标题相同"
+                        : "疑似重复"}
+                    </span>
+                    {!it.skip && (
+                      <span className="rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-700">
+                        明确另存
+                      </span>
+                    )}
+                  </>
+                ) : (
+                  <span
+                    className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                      STATUS_CLASS[it.status] || STATUS_CLASS.pending
+                    }`}
+                  >
+                    {STATUS_LABEL[it.status] || it.status}
+                  </span>
+                )}
                 <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-800">
                   {a.title || firstLine(it.text)}
                 </span>
               </div>
 
               <div className="space-y-1 pl-1">
-                <Row label="截止" value={when} />
-                <Row label="活动" value={event} />
+                <Row
+                  label={timeType === "start" ? "开始" : "截止"}
+                  value={
+                    timeType === "start"
+                      ? startDate
+                        ? [startDate, startTime || NO_TIME_NOTE].join(" ")
+                        : NO_TIME_NOTE
+                      : a.deadline
+                      ? [a.deadline, a.time || NO_TIME_NOTE].join(" ")
+                      : when
+                  }
+                />
+                <Row label="活动" value={eventText} />
                 <Row label="地点" value={a.location} />
                 <Row
                   label="材料"
@@ -109,6 +168,62 @@ export default function MultiResultPanel({ items, onSave, canSave, saveLabel }) 
                 <p className="mt-1.5 pl-1 text-[11px] text-red-500">
                   {it.errorMsg}
                 </p>
+              )}
+
+              {it.dupInfo && it.dupInfo.type !== "none" && (
+                <div className="mt-1.5 pl-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
+                      {DUP_LABEL[it.dupInfo.type] || "疑似重复"}
+                      {it.dupInfo.withinBatch ? "（同批次内）" : ""}
+                    </span>
+                    <span className="text-[11px] text-slate-500">
+                      当前：{it.skip ? "跳过" : "明确另存"}
+                    </span>
+                    {it.dupInfo.notice && it.dupInfo.notice.text && (
+                      <button
+                        type="button"
+                        onClick={() => toggleDup(idx)}
+                        className="rounded border border-slate-200 bg-white px-2 py-0.5 text-[11px] text-slate-600 hover:bg-slate-50"
+                      >
+                        {openDup[idx] ? "收起已有正文" : "查看已有正文"}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (onSkip) onSkip(idx, true);
+                      }}
+                      className={`rounded border px-2 py-0.5 text-[11px] ${
+                        it.skip
+                          ? "border-blue-300 bg-blue-50 text-blue-700"
+                          : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                      }`}
+                    >
+                      跳过本条
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (onSkip) onSkip(idx, false);
+                      }}
+                      className={`rounded border px-2 py-0.5 text-[11px] ${
+                        !it.skip
+                          ? "border-blue-300 bg-blue-50 text-blue-700"
+                          : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                      }`}
+                    >
+                      明确另存
+                    </button>
+                  </div>
+                  {openDup[idx] &&
+                    it.dupInfo.notice &&
+                    it.dupInfo.notice.text && (
+                      <p className="mt-1 max-h-32 overflow-y-auto whitespace-pre-wrap rounded bg-slate-50 px-2 py-1 text-[11px] leading-relaxed text-slate-600">
+                        {it.dupInfo.notice.text}
+                      </p>
+                    )}
+                </div>
               )}
             </li>
           );

@@ -3,10 +3,11 @@
 import { useState } from "react";
 import ItemsPanel from "./ItemsPanel";
 import PatchHistory from "./PatchHistory";
-import { parseUserDateInput } from "../lib/deadline.js";
+import { parseUserDateInput, NO_TIME_NOTE } from "../lib/deadline.js";
 import { getNoticeTitle } from "../lib/shareText.js";
 import { shortParseErrorLabel, describeParseError, isFuzzyDate } from "../lib/aiExtract.js";
 import { findSpan, findTitleSpan } from "../lib/fieldLocate.js";
+import { getNoticeTimeType } from "../lib/noticeItems.js";
 
 const FIELDS = [
   { key: "title", label: "标题", editable: true, full: true },
@@ -58,6 +59,10 @@ function getDisplayText(field, analysis, selectedNotice, draftText) {
   const emptyLabel = field.key === "category" ? "未分类" : "未识别";
   if (Array.isArray(v)) {
     return v.length === 0 ? emptyLabel : v.join("、");
+  }
+  // 具体时间原文本来就没写，不是抽取失败，用现成常量说明，不显示未识别
+  if (field.key === "time" && !v) {
+    return NO_TIME_NOTE;
   }
   return v || emptyLabel;
 }
@@ -271,7 +276,10 @@ export default function AnalysisPanel({
                 draftText
               );
               const isEmpty =
-                text === "未识别" || text === "未分类" || text === "暂无摘要";
+                text === "未识别" ||
+                text === "未分类" ||
+                text === "暂无摘要" ||
+                text === NO_TIME_NOTE;
               const showInferredHint =
                 field.key === "deadline" &&
                 analysis._inferredDeadline &&
@@ -291,7 +299,13 @@ export default function AnalysisPanel({
                   <div className="group mb-0.5 flex items-center justify-between">
                     <div className="flex items-center gap-1.5">
                       <p className="text-xs font-semibold text-slate-500">
-                        {field.label}
+                        {getNoticeTimeType(analysis) === "start"
+                          ? field.key === "deadline"
+                            ? "活动日期"
+                            : field.key === "time"
+                            ? "开始时间"
+                            : field.label
+                          : field.label}
                       </p>
                       {field.ai && (
                         <span className="rounded bg-slate-100 px-1 py-0.5 text-[10px] font-medium text-slate-400">
